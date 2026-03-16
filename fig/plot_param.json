@@ -1,0 +1,23 @@
+{
+    "BIP-20DEC30-CDE": {
+        "xlim": [30000, 90000],
+        "ylim": [0, 5600],
+        "width": 600,
+        "xunit": "USD",
+        "yunit": "contract (0.01 BTC)"
+    },
+    "ETH-USD": {
+        "xlim": [0, 8000],
+        "ylim": [0, 2200],
+        "width": 50,
+        "xunit": "USD",
+        "yunit": "ETH"
+    },
+    "ETP-20DEC30-CDE": {
+        "xlim": [0, 5000],
+        "ylim": [0, 4200],
+        "width": 40,
+        "xunit": "USD",
+        "yunit": "contract (0.01 ETH)"
+    }
+}
