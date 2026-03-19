@@ -16,7 +16,7 @@
     "ETP-20DEC30-CDE": {
         "xlim": [0, 5000],
         "ylim": [0, 4200],
-        "width": 40,
+        "width": 1,
         "xunit": "USD",
         "yunit": "contract (0.01 ETH)"
     }

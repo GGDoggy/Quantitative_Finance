@@ -4,61 +4,69 @@ import time
 import calendar
 
 
-def save_order_book(order_book, record_time):
-    savetime = time.strftime("%Y%m%d-%H%M%S", time.gmtime(record_time))
-    print(savetime)
-    with open(f"orderbook-{savetime}.json", "w") as file:
-        json.dump(order_book, file)
+def received_time_to_float(str):
+    sec = str[:19]
+    sec = time.strptime(sec, "%Y-%m-%dT%H:%M:%S")
+    sec = calendar.timegm(sec)
+    return sec, float("0" + str[19:-1])
+
+def save_update(update_hist, start_time, end_time):
+    if update_hist == dict():
+        return
+    start_time = time.strftime("%Y%m%d.%H%M%S", time.gmtime(start_time))
+    end_time = time.strftime("%Y%m%d.%H%M%S", time.gmtime(end_time))
+    print("Saved update at ", end_time)
+    with open(f"update-{start_time}-{end_time}.json", "w") as file:
+        json.dump(update_hist, file)
 
 def on_message(msg):
-    global order_book
-    global record_interval
-    global record_time
+    global update_hist
+    global saving_interval
+    global saving_time
+    global last_saving_time
     msg = json.loads(msg)
 
     if msg["channel"] == "heartbeats":
-        # print(msg)
-        tstamp = msg["timestamp"][:-4]
-        tstamp = time.strptime(tstamp, "%Y-%m-%dT%H:%M:%S.%f")
-        tstamp = calendar.timegm(tstamp)
-        # print(time.strftime("%Y-%m-%d-%H-%M-%S", tstamp))
-        # print(tstamp, record_time)
-        if tstamp >= record_time:
-            save_order_book(order_book, tstamp)
-            record_time = tstamp + record_interval
+        tstamp = received_time_to_float(msg["timestamp"])[0]
+
+        # Save data at saving_time or later
+        if tstamp >= saving_time:
+            save_update(update_hist, last_saving_time, tstamp)
+            update_hist = dict()
+            saving_time = tstamp + saving_interval
+            last_saving_time = tstamp
     
     if msg["channel"] == "l2_data":
         for event in msg["events"]:
-            if event["type"] == "snapshot":
+            # for new update_hist, add product_id
+            if not event["product_id"] in update_hist:
+                update_hist[event["product_id"]] = dict()
 
-                # print(event["type"], event["product_id"])
-                order_book[event["product_id"]] = {"bid": dict(), "offer": dict()}
-                for update in event["updates"]:
-                    order_book[event["product_id"]][update["side"]][update["price_level"]] = update["new_quantity"]
+            for update in event["updates"]:
+                # Unix time
+                t = received_time_to_float(update["event_time"])
+                t = str(t[0]) + str(t[1])[1:]
+                # If it is a new time stamp
+                if not t in update_hist[event["product_id"]]:
+                    update_hist[event["product_id"]][t] = {"type": event["type"], "data": {"bid": dict(), "offer": dict()}}
 
-            elif event["type"] == "update":
+                if event["type"] != update_hist[event["product_id"]][t]["type"]:
+                    print("Cannot update data: Two types appear in a same time.")
+                else:
+                    update_hist[event["product_id"]][t]["data"][update["side"]][update["price_level"]] = update["new_quantity"]
 
-                for update in event["updates"]:
-                    if float(update["new_quantity"]) == 0:
-                        # print(update)
-                        try:
-                            order_book[event["product_id"]][update["side"]].pop(update["price_level"])
-                        except KeyError:
-                            # print("Price " + update["price_level"] + " does not exist.")
-                            pass
-                        # print("pop success")
-                    else:
-                        order_book[event["product_id"]][update["side"]][update["price_level"]] = update["new_quantity"]
 
 
 with open("config.json", "r") as file:
     config = json.load(file)
 
-record_interval = config["record_interval"]
+saving_interval = config["saving_interval"]
 product_id = config["product_id"]
 
-order_book = dict()
-record_time = calendar.timegm(time.gmtime()) + record_interval
+update_hist = dict()
+current_time = calendar.timegm(time.gmtime())
+saving_time = current_time + saving_interval
+last_saving_time = current_time
 ws_client = WSClient(on_message=on_message, verbose=True)
 
 ws_client.open()
