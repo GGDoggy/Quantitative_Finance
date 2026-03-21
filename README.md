@@ -51,4 +51,4 @@ The timestamps of the files in `/data` are in UTC, as well as those generated in
     }, ...
 }
 ```
-`PRICE` and `AMOUNT` are *float*.
+`PRICE` is *string* and `AMOUNT` is *float*.

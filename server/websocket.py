@@ -59,9 +59,7 @@ def on_message(msg):
                     l2_hist[event["product_id"]][t]["data"][update["side"]][update["price_level"]] = update["new_quantity"]
     
     if msg["channel"] == "market_trades":
-        for event in msg["events"]:
-            
-
+        for event in msg["events"]:            
             for trade in event["trades"]:
                 # for new trade_hist, add product_id
                 if not trade["product_id"] in trade_hist:
@@ -72,10 +70,10 @@ def on_message(msg):
                 # If it is a new time stamp
                 if not t in trade_hist[trade["product_id"]]:
                     trade_hist[trade["product_id"]][t] = {"BUY": dict(), "SELL": dict()}
-                else:
-                    trade_hist[trade["product_id"]][t][trade["side"]][float(trade["price"])] = float(trade["size"])
 
+                trade_hist[trade["product_id"]][t][trade["side"]][trade["price"]] = float(trade["size"])
 
+ 
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -91,5 +89,5 @@ last_saving_time = current_time
 ws_client = WSClient(on_message=on_message, verbose=True)
 
 ws_client.open()
-ws_client.subscribe(product_id, ["heartbeats", "level2"])
+ws_client.subscribe(product_id, ["heartbeats", "level2", "market_trades"])
 ws_client.run_forever_with_exception_check()
