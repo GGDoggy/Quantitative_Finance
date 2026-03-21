@@ -8,7 +8,7 @@ You can change websocket setting in `config.json`.
 
 The timestamps of the files in `/data` are in UTC, as well as those generated in `/server`.
 
-## Data structure
+## Data Structure
 
 ### v1
 ```
@@ -23,6 +23,7 @@ The timestamps of the files in `/data` are in UTC, as well as those generated in
 
 
 ### v2
+#### Level 2
 ```
 {
     "PRODUCT_ID": {
@@ -37,3 +38,17 @@ The timestamps of the files in `/data` are in UTC, as well as those generated in
 }
 ```
 `TYPE` can be either `"snapshot"` or `"update"`.
+
+`PRICE` and `AMOUNT` are *string*.
+#### Market Trades
+```
+{
+    "PRODUCT_ID": {
+        TIME: {
+            "BUY": {PRICE: AMOUNT, ...},
+            "SELL": {PRICE: AMOUNT, ...}
+        }, ...
+    }, ...
+}
+```
+`PRICE` and `AMOUNT` are *float*.
