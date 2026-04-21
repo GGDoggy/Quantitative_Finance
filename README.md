@@ -89,7 +89,7 @@ The time should be identical and is the time of the initial order book.
 | ... | ... | ... | ... |
 
 - `SIDE`: -1 for sell order / +1 for buy order  
-- `TIME`: Seconds from midnight *(UTC+8)* of the filename date
+- `TIME`: Seconds from midnight of the filename date
 
 #### Market Trades
 
@@ -105,4 +105,4 @@ The time refers to the very first data.
 | ... | ... | ... | ... |
 
 - `SIDE`: -1 for buy taker / +1 for sell taker  
-- `TIME`: Seconds from midnight *(UTC+8)* of the filename date
+- `TIME`: Seconds from midnight of the filename date
