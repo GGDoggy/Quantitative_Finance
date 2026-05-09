@@ -1,14 +1,12 @@
-import holoviews as hv
-import holoviews.operation.datashader as rd
 from os import walk
-import csv
-import time
-import calendar
 import numpy as np
-from datetime import datetime, timezone, timedelta
+import datashader as ds
+import holoviews as hv
+import pandas as pd
 import panel as pn
-from matplotlib import cm
-from matplotlib.colors import ListedColormap
+import matplotlib.colors as mcolors
+from holoviews.operation.datashader import dynspread
+from functools import partial
 
 
 def search_data(path: str):
@@ -16,173 +14,181 @@ def search_data(path: str):
         filelist = c
         break
     
-    data_name_list = []
+    file_list = []
+    ids = set()
     for file in filelist:
         split = file.split("-")
-        if split[-2] == "init":
-            id = file[7:-25]
-            data_name_list.append((id, split[-1][:-4]))
+        id = "-".join(split[:-3])
+        time_step = float(split[-2])
+        file_list.append((id, time_step, file))
+        ids.add(id)
+
+    return file_list, list(ids)
+
+def load_data(path: str):
+    data = np.load(path)
+    price_axis = data["price_axis"]
+    time_axis = data["time_axis"].astype(np.int64)
+    volume = data["data"].T
+    bid = data["bid"]
+    ask = data["ask"]
+    T, P = np.meshgrid(time_axis, price_axis)
+    volume = pd.DataFrame({"Time": T.flatten(), "Price": P.flatten(), "sumVolume": np.abs(volume).flatten(), "diffVolume": volume.flatten()})
+
+    return price_axis, time_axis, volume, bid, ask
+
+def compute_pixel(dataset):
+    sumVol = dataset.data.sumVol
+    diffVol = dataset.data.diffVol
+
+    ask = (sumVol + diffVol) * 0.5
+    bid = (sumVol - diffVol) * 0.5
+    volume = np.where(ask > bid, np.log1p(ask), -np.log1p(bid))
+
+    return hv.Image((dataset.data.Time.astype("datetime64[ns]"), dataset.data.Price, volume))
+
+def get_canvas_full(x_range, y_range, raw_volume, total_start_time, default_range):
+    if x_range is None or y_range is None:
+        x_range = default_range[0]
+        y_range = default_range[1]
+    start_time = pd.to_datetime(x_range[0]).timestamp() - total_start_time
+    end_time = pd.to_datetime(x_range[1]).timestamp() - total_start_time
+    canvas = ds.Canvas(plot_width=plot_width, plot_height=plot_height, y_range=y_range, x_range=(start_time, end_time))
+    agg_sum = canvas.points(raw_volume, "Time", "Price", ds.reductions.sum("sumVolume"))
+    agg_diff = canvas.points(raw_volume, "Time", "Price", ds.reductions.sum("diffVolume"))
+    plot_x = pd.to_datetime(agg_sum["Time"] + total_start_time, unit="s")
+    plot_y = agg_sum["Price"]
+    agg_sum = np.nan_to_num(agg_sum, nan=0.0)
+    agg_diff = np.nan_to_num(agg_diff, nan=0.0)
+    ask_volume = (agg_sum + agg_diff) * 0.5
+    bid_volume = (agg_sum - agg_diff) * 0.5
+    plot_z = np.where(ask_volume > bid_volume, np.log1p(ask_volume), -np.log1p(bid_volume))
+    plot_z.reshape((len(plot_x), len(plot_y)))
+
+    return hv.Image((plot_x, plot_y, plot_z))
+
+def get_price_line(x_range, y_range, raw, name, color, default_range):
+    if x_range is None or (x_range[0] is None):
+        x_range = default_range
     
-    available = []
-    ids = set()
-    for data_name in data_name_list:
-        l2_updates = f"level2-{data_name[0]}-updates-{data_name[1]}.csv"
-        trade = f"trade-{data_name[0]}-{data_name[1]}.csv"
-        if l2_updates in filelist and trade in filelist:
-            available.append(data_name)
-            ids.add(data_name[0])
+    try:
+        s_val = x_range[0]
+        e_val = x_range[1]
+        
+        start_ts = pd.to_datetime(s_val).timestamp()
+        end_ts = pd.to_datetime(e_val).timestamp()
+        
+        time_array = raw["Time"].values.astype(float)
+        mask = (time_array >= start_ts) & (time_array <= end_ts)
+        keeping = raw.loc[mask]
+        
+        value_col = [c for c in raw.columns if c != "Time"][0]
+        
+        return hv.Curve(keeping, kdims=["Time"], vdims=[value_col], name=name).opts(
+            color=color, line_width=2
+        )
+    except Exception as e:
+        print(f"Error in get_price_line: {e}")
+        return hv.Curve([], kdims=["Time"], vdims=["Value"], name=name)
     
-    return available, list(ids)
-
-def read_csv(path):
-    with open(path) as file:
-        reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
-        data = list(reader)
-    return data
-
-def file_time_to_unix(file_time: str):
-    sec = time.strptime(file_time, "%Y%m%d.%H%M%S")
-    sec = calendar.timegm(sec)
-    return sec
-
-def update_orderbook(orderbook, price_levels, price, volume, side):
-    ind = np.searchsorted(price_levels, price)
-    orderbook[ind] = volume * side * -1
-    # orderbook[ind] = np.log1p(volume) * side * -1
-    # orderbook[ind] = np.log1p(volume)
-
-def orderbook_to_volatility(orderbooks):
-    for i, vol in enumerate(orderbooks):
-        if vol > 0:
-            mid = i
-            break
-    for i in range(mid+1, len(orderbooks)):
-        orderbooks[i] += orderbooks[i-1]
-    i = mid - 2
-    while i >= 0:
-        orderbooks[i] += orderbooks[i+1]
-        i -= 1
-    return orderbooks
-
-def get_bid_ask(orderbook, price_levels):
-    for i, v in enumerate(orderbook):
-        if v > 0:
-            break
-        if v != 0:
-            bid = price_levels[i]
-    n = len(orderbook) - 1
-    for i in range(n):
-        v = orderbook[n - i]
-        if v < 0:
-            break
-        if v != 0:
-            ask = price_levels[n - i]
-    return bid, ask
-
-def bound_data(data, price_levels, max_price, min_price):
-    # Keep data between max_price and min_price
-    up_ind = np.searchsorted(price_levels, max_price)
-    low_ind = np.searchsorted(price_levels, min_price)
-    return data[:, low_ind:up_ind+1], price_levels[low_ind:up_ind+1]
-
-def to_plotable(init, updates, start_time: int, time_step):
-    # Generate price axis
-    price_levels = set()
-    for level in init:
-        price_levels.add(level[0])
-    for update in updates:
-        price_levels.add(update[1])
-    price_levels = np.array(list(price_levels))
-    price_levels.sort()
-    price_num = len(price_levels)
-    
-    orderbook = np.zeros(price_num)
-    for level in init:
-        update_orderbook(orderbook, price_levels, level[0], level[1], level[2])
-    # Generate order book history
-    orderbook_list = []
-    bid = []
-    ask = []
-    start_time = datetime.fromtimestamp(start_time, tz=timezone(timedelta()))
-    time_origin = start_time - timedelta(hours=start_time.hour, minutes=start_time.minute, seconds=start_time.second)
-    time_step = timedelta(seconds=time_step)
-    index = 0
-    time_num = 0
-    updates.sort()
-    current_time = time_origin
-    start_update = False
-    while index < len(updates):
-        next_update_time = time_origin + timedelta(seconds=updates[index][0])
-        if current_time < next_update_time:
-            if start_update:
-                orderbook_list.append(orderbook.copy())
-                b, a = get_bid_ask(orderbook, price_levels)
-                bid.append(b)
-                ask.append(a)
-                end_time = current_time
-                time_num += 1
-            current_time += time_step
-            continue
-        else:
-            update_orderbook(orderbook, price_levels, updates[index][1], updates[index][2], updates[index][3])
-            start_update = True
-            index += 1
-            continue
-    else:
-        orderbook_list.append(orderbook.copy())
-        end_time = current_time
-        time_num += 1
-    start_time = end_time - time_step * (time_num - 1)
-    # Generage time axis
-    time_axis = start_time + np.arange(time_num) * time_step
-
-    return price_levels, np.array(time_axis, dtype='datetime64[ns]'), np.array(orderbook_list), np.array(bid), np.array(ask)
 
 
-
-
-grid_num = 50
 time_step = 0.01
-path = "data/v3/"
+path = "data/preprocessed/"
 id = "ETH-USD"
-
-hv.extension('bokeh')
-# Colormap
-original_cmap = cm.get_cmap('jet', 256)
-new_colors = original_cmap(np.linspace(0, 1, 256))
-new_colors[0] = [0, 0, 0, 1]
-custom_cmap = ListedColormap(new_colors)
+init_price_interval = 5
+init_time_interval = 30
+plot_width = 1000
+plot_height = 200
 
 
-data_list, products = search_data(path)
-for data in data_list:
-    if data[0] != id:
+raw_volume = pd.DataFrame({"Time": [], "Price": [], "sumVolume": [], "diffVolume": []})
+raw_bid = pd.DataFrame({"Time": [], "bid": []})
+raw_ask = pd.DataFrame({"Time": [], "ask": []})
+raw_mid = pd.DataFrame({"Time": [], "mid": []})
+
+file_list, ids = search_data(path)
+
+# Load data
+for file in file_list:
+    if file[0] != id:
         continue
-    l2_init = read_csv(path + f"level2-{data[0]}-init-{data[1]}.csv")
-    l2_updates = read_csv(path + f"level2-{data[0]}-updates-{data[1]}.csv")
-    trade = read_csv(path + f"trade-{data[0]}-{data[1]}.csv")
-    price_axis, time_axis, data, bid, ask = to_plotable(l2_init, l2_updates, file_time_to_unix(data[1]), time_step)
+        
+    price_axis, time_axis, volume, bid, ask = load_data(path + file[2])
     mid = 0.5 * (bid + ask)
 
-    data, price_axis = bound_data(data, price_axis, 2313.1, 2312)
-    data = np.log1p(np.abs(data))
-    
-    heatmap = hv.QuadMesh((time_axis, price_axis, data.T), kdims=['time', 'price'], vdims=['log volume'])
-    dynamic_heatmap = rd.quadmesh_rasterize(heatmap, 
-        dynamic=True,
-        aggregator='max',
-           
-        tools=['hover', 'wheel_zoom', 'box_zoom', 'reset']
-    )
-    dynamic_heatmap.opts(width=2000, height=900, cmap=custom_cmap, clim=(0, 6), colorbar=True)
+    raw_volume = pd.concat([raw_volume, volume])
+    raw_bid = pd.concat([raw_bid, pd.DataFrame({"Time": time_axis, "bid": bid})])
+    raw_ask = pd.concat([raw_ask, pd.DataFrame({"Time": time_axis, "ask": ask})])
+    raw_mid = pd.concat([raw_mid, pd.DataFrame({"Time": time_axis, "mid": mid})])
 
-
-    bid_line = hv.Curve((time_axis, bid), name='Bid').opts(color='Green', line_width=1.5)
-    ask_line = hv.Curve((time_axis, ask), name='Ask').opts(color='Red', line_width=1.5)
-    mid_line = hv.Curve((time_axis, mid), name='Mid').opts(color='White', line_width=1.5)
-    
 
     break
 
-layout = pn.Column(dynamic_heatmap * bid_line * ask_line * mid_line)
+
+
+# Sort data by time
+raw_bid.sort_values("Time", inplace=True)
+raw_ask.sort_values("Time", inplace=True)
+raw_mid.sort_values("Time", inplace=True)
+
+# Calculate init axis range
+total_start_time = raw_bid["Time"][0]
+end_time = raw_bid["Time"].iat[-1]
+start_time = int(end_time - init_time_interval * 1e9)
+end_mid = raw_mid["mid"].iat[-1]
+start_price = end_mid - init_price_interval / 2
+end_price = end_mid + init_price_interval / 2
+start_time = pd.to_datetime(start_time, unit="ns")
+end_time = pd.to_datetime(end_time, unit="ns")
+
+# Dynamic plot
+raw_volume["Time"] -= total_start_time
+raw_volume["Time"] /= 1e9
+range_stream = hv.streams.RangeXY()
+get_canvas = partial(get_canvas_full, raw_volume=raw_volume, total_start_time=total_start_time/1e9, default_range=((start_time, end_time), (start_price, end_price)))
+plot = hv.DynamicMap(get_canvas, streams=[range_stream])
+plot = dynspread(plot, threshold=0.8, max_px=10)
+range_stream.source = plot
+
+# Prepare price line data
+# raw_bid["Time"] /= 1e9
+# raw_ask["Time"] /= 1e9
+# raw_mid["Time"] /= 1e9
+# get_bid = partial(get_price_line, raw=raw_bid, name="bid", color='#00FF00', default_range=(start_time, end_time))
+# get_ask = partial(get_price_line, raw=raw_ask, name="ask", color='#FF0000', default_range=(start_time, end_time))
+# get_mid = partial(get_price_line, raw=raw_mid, name="mid", color='#00949B', default_range=(start_time, end_time))
+
+# Plot
+hv.extension("bokeh")
+# bid_line = hv.DynamicMap(get_bid, streams=[range_stream])
+# ask_line = hv.DynamicMap(get_ask, streams=[range_stream])
+# mid_line = hv.DynamicMap(get_mid, streams=[range_stream])
+
+# Custom color map
+colors = ["#0058FF", "#E7E7E7", "#FF6F06"]
+custom_cmap = mcolors.LinearSegmentedColormap.from_list("black_rainbow", colors, N=256)
+
+
+# agg = rasterize(
+#     hv.Points(raw_volume, kdims=['Time', 'Price'], vdims=['sumVolume', 'diffVolume']),
+#     aggregator=ds.summary(sumVol=ds.sum('sumVolume'), diffVol=ds.sum('diffVolume'))
+# )
+# dynamic_img = agg.apply(compute_pixel)
+# colors = ["#0058FF", "#E7E7E7", "#FF6F06"]
+# custom_cmap = mcolors.LinearSegmentedColormap.from_list("black_rainbow", colors, N=256)
+# final_plot = dynamic_img.opts(
+#     width=plot_width, 
+#     height=plot_height,
+#     colorbar=True,
+#     cmap=custom_cmap,
+#     clim=(-10, 10)
+# )
+
+
+# Layout
+# max_val = np.max(np.abs(plot_z))
+plot.opts(width=2000, height=800, colorbar=True, cmap=custom_cmap, clim=(-10, 10))
+# layout = pn.Column(plot)
+layout = (plot).opts(xlim=(start_time, end_time), ylim=(start_price, end_price))
 pn.serve(layout, show=True, title="Orderbook Viewer")
