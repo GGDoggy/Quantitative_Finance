@@ -44,6 +44,9 @@
 - 視覺化:
   - `gui/plot.py` 目前硬編碼商品 `id = "ETH-USD"`，並只取掃描到的第一個符合檔案。
   - 啟動後會用 `pn.serve(..., show=True)` 開本地服務與瀏覽器視窗。
+- Python 環境:
+  - 這個專案的所有 Python 程式應在 conda 環境 `quantitative_finance` 下執行。
+  - 啟動方式優先使用 `conda run -n quantitative_finance ...`，避免誤用 base 或其他環境。
 
 # 依賴現況
 
