@@ -1,221 +1,216 @@
-from os import walk
-from functools import partial
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import holoviews as hv
-import numpy as np
-import pandas as pd
 import panel as pn
-from bokeh.models import BasicTicker, ColorBar, LinearColorMapper
-from holoviews.operation.datashader import dynspread, rasterize, shade
+from plotly.graph_objects import Figure
+
+from gui.data_catalog import discover_preprocessed_datasets, discover_raw_batches, load_preprocessed_payload
+from gui.plots import PLOT_BUILDERS
+from gui.preprocess_service import preprocess_batches
 
 
-def search_data(path: str):
-    for _, _, files in walk(path):
-        filelist = files
-        break
-    else:
-        return [], []
-
-    file_list = []
-    ids = set()
-    for file in filelist:
-        split = file.split("-")
-        product_id = "-".join(split[:-3])
-        time_step = float(split[-2])
-        file_list.append((product_id, time_step, file))
-        ids.add(product_id)
-
-    return file_list, list(ids)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "v3"
+PREPROCESSED_DIR = PROJECT_ROOT / "data" / "preprocessed"
+PLOT_LABELS = {
+    "orderbook": "Orderbook",
+    "trades_scatter": "Trades Scatter",
+    "trade_volume_timeline": "Trade Volume Timeline",
+}
 
 
-def load_data(path: str):
-    data = np.load(path)
-    price_axis = data["price_axis"]
-    time_axis = pd.to_datetime(data["time_axis"])
-    volume = data["data"].T
-    bid = data["bid"]
-    ask = data["ask"]
-    signed_log_volume = np.sign(volume) * np.log1p(np.abs(volume))
+class OrderbookDashboard:
+    def __init__(self, raw_dir: Path, preprocessed_dir: Path) -> None:
+        self.raw_dir = raw_dir
+        self.preprocessed_dir = preprocessed_dir
+        self.preprocessed_by_label = {}
+        self.raw_by_label = {}
+        self.status = pn.pane.Alert("Ready.", alert_type="light", sizing_mode="stretch_width")
+        self.preprocessed_select = pn.widgets.MultiChoice(
+            name="Preprocessed datasets",
+            options=[],
+            sizing_mode="stretch_width",
+            min_height=180,
+        )
+        self.raw_select = pn.widgets.MultiChoice(
+            name="Raw batches pending preprocess",
+            options=[],
+            sizing_mode="stretch_width",
+            min_height=180,
+        )
+        self.plot_select = pn.widgets.MultiChoice(
+            name="Plots",
+            value=["Orderbook"],
+            options=list(PLOT_LABELS.values()),
+            sizing_mode="stretch_width",
+        )
+        self.refresh_button = pn.widgets.Button(name="Refresh Catalog", button_type="default", sizing_mode="stretch_width")
+        self.preprocess_button = pn.widgets.Button(name="Preprocess Selected", button_type="primary", sizing_mode="stretch_width")
+        self.plot_area = pn.Column(
+            pn.pane.Markdown("Select one or more preprocessed datasets to start plotting."),
+            sizing_mode="stretch_both",
+        )
 
-    return price_axis, time_axis, signed_log_volume, bid, ask
+        self.refresh_button.on_click(self._handle_refresh)
+        self.preprocess_button.on_click(self._handle_preprocess)
+        self.preprocessed_select.param.watch(self._handle_selection_change, "value")
+        self.plot_select.param.watch(self._handle_selection_change, "value")
 
+        self.refresh_catalog()
 
-def get_canvas_full(x_range, y_range, time_axis, price_axis, volume, default_range):
-    if x_range is None or x_range[0] is None or y_range is None or y_range[0] is None:
-        x_range, y_range = default_range
+    def refresh_catalog(self) -> None:
+        datasets = discover_preprocessed_datasets(self.preprocessed_dir)
+        batches = discover_raw_batches(self.raw_dir, self.preprocessed_dir)
+        self.preprocessed_by_label = {dataset.display_name: dataset for dataset in datasets}
+        self.raw_by_label = {
+            batch.display_name: batch
+            for batch in batches
+            if not batch.is_preprocessed
+        }
 
-    time_ns = time_axis.view("int64")
-    start_ns = pd.Timestamp(x_range[0]).value
-    end_ns = pd.Timestamp(x_range[1]).value
-    start_price, end_price = y_range
+        existing_preprocessed = [label for label in self.preprocessed_select.value if label in self.preprocessed_by_label]
+        existing_raw = [label for label in self.raw_select.value if label in self.raw_by_label]
 
-    x0 = max(0, np.searchsorted(time_ns, start_ns, side="left"))
-    x1 = min(len(time_axis), np.searchsorted(time_ns, end_ns, side="right"))
-    y0 = max(0, np.searchsorted(price_axis, start_price, side="left"))
-    y1 = min(len(price_axis), np.searchsorted(price_axis, end_price, side="right"))
+        self.preprocessed_select.options = list(self.preprocessed_by_label.keys())
+        self.preprocessed_select.value = existing_preprocessed
 
-    if x0 == x1:
-        x1 = min(len(time_axis), x0 + 1)
-    if y0 == y1:
-        y1 = min(len(price_axis), y0 + 1)
+        self.raw_select.options = list(self.raw_by_label.keys())
+        self.raw_select.value = existing_raw
 
-    sliced_time = time_axis[x0:x1]
-    sliced_price = price_axis[y0:y1]
-    sliced_volume = volume[y0:y1, x0:x1]
+        if not self.preprocessed_select.value and datasets:
+            self.preprocessed_select.value = [datasets[0].display_name]
 
-    return hv.QuadMesh((sliced_time, sliced_price, sliced_volume), kdims=["Time", "Price"], vdims=["Volume"])
+        self._render_plots()
 
+    def _set_status(self, message: str, level: str = "light") -> None:
+        self.status.object = message
+        self.status.alert_type = level
 
-def get_price_line(x_range, y_range, raw, name, color, default_range):
-    if x_range is None or x_range[0] is None:
-        x_range = default_range
+    def _handle_refresh(self, _event) -> None:
+        self.refresh_catalog()
+        self._set_status("Catalog refreshed.", "success")
 
-    start_time = pd.Timestamp(x_range[0])
-    end_time = pd.Timestamp(x_range[1])
-    mask = raw["Time"].between(start_time, end_time)
-    keeping = raw.loc[mask]
-    value_col = next(col for col in raw.columns if col != "Time")
+    def _handle_preprocess(self, _event) -> None:
+        selected_batches = [self.raw_by_label[label] for label in self.raw_select.value if label in self.raw_by_label]
+        if not selected_batches:
+            self._set_status("Select at least one raw batch before preprocessing.", "warning")
+            return
 
-    if keeping.empty:
-        return hv.Curve([], kdims=["Time"], vdims=[value_col], label=name).opts(color=color, line_width=2)
+        self.preprocess_button.disabled = True
+        try:
+            progress_messages: list[str] = []
 
-    return hv.Curve(keeping, kdims=["Time"], vdims=[value_col], label=name).opts(color=color, line_width=2)
+            def update_progress(message: str) -> None:
+                progress_messages.append(message)
+                self._set_status("\n".join(progress_messages), "primary")
 
+            preprocess_batches(
+                selected_batches,
+                output_dir=self.preprocessed_dir,
+                progress_callback=update_progress,
+            )
+            self.refresh_catalog()
+            new_labels = [
+                dataset.display_name
+                for dataset in self.preprocessed_by_label.values()
+                if (dataset.product_id, dataset.timestamp) in {(batch.product_id, batch.timestamp) for batch in selected_batches}
+            ]
+            self.preprocessed_select.value = sorted(set(self.preprocessed_select.value + new_labels))
+            self._set_status(f"Preprocessed {len(selected_batches)} batch(es).", "success")
+        except Exception as error:
+            self._set_status(f"Preprocess failed: {error}", "danger")
+        finally:
+            self.preprocess_button.disabled = False
 
-time_step = 0.01
-path = "data/preprocessed/"
-id = "ETH-USD"
-init_price_interval = 5
-init_time_interval = 30
-plot_width = 1000
-plot_height = 200
-heatmap_clim = (-10, 10)
-heatmap_label = "Signed Depth"
-heatmap_unit = "sign(volume) * log1p(|volume|)"
-heatmap_color_anchors = [
-    "#081D58",
-    "#225EA8",
-    "#1D91C0",
-    "#F0F0F0",
-    "#F46D43",
-    "#D7301F",
-    "#7F0000",
-]
+    def _handle_selection_change(self, _event) -> None:
+        self._render_plots()
 
+    def _build_plot_pane(self, plot_type: str, payloads: list[dict[str, object]]):
+        builder = PLOT_BUILDERS[plot_type]
+        plot = builder(payloads)
+        if isinstance(plot, Figure):
+            return pn.pane.Plotly(plot, config={"responsive": True}, sizing_mode="stretch_width")
+        return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
 
-def interpolate_palette(colors, n_colors=256):
-    anchor_rgb = np.array(
-        [[int(color[i:i + 2], 16) for i in (1, 3, 5)] for color in colors],
-        dtype=float,
-    )
-    anchor_positions = np.linspace(0, 1, len(anchor_rgb))
-    sample_positions = np.linspace(0, 1, n_colors)
-    channels = [
-        np.interp(sample_positions, anchor_positions, anchor_rgb[:, channel])
-        for channel in range(3)
-    ]
-    rgb = np.stack(channels, axis=1).round().astype(int)
-    return [f"#{r:02X}{g:02X}{b:02X}" for r, g, b in rgb]
+    def _render_plots(self) -> None:
+        selected_datasets = [self.preprocessed_by_label[label] for label in self.preprocessed_select.value if label in self.preprocessed_by_label]
+        selected_plot_labels = self.plot_select.value
 
+        if not selected_datasets:
+            self.plot_area.objects = [pn.pane.Markdown("Select one or more preprocessed datasets to start plotting.")]
+            return
 
-heatmap_colors = interpolate_palette(heatmap_color_anchors)
+        if not selected_plot_labels:
+            self.plot_area.objects = [pn.pane.Markdown("Select at least one plot type.")]
+            return
 
+        product_ids = {dataset.product_id for dataset in selected_datasets}
+        if len(product_ids) != 1:
+            self.plot_area.objects = [pn.pane.Alert("Please select datasets from the same product for plotting.", alert_type="warning")]
+            return
 
-def add_heatmap_colorbar(plot, _):
-    if getattr(plot.state, "_orderbook_colorbar_added", False):
-        return
+        payloads = [load_preprocessed_payload(dataset) for dataset in selected_datasets]
+        plot_panes = []
 
-    color_mapper = LinearColorMapper(palette=heatmap_colors, low=heatmap_clim[0], high=heatmap_clim[1])
-    color_bar = ColorBar(
-        color_mapper=color_mapper,
-        ticker=BasicTicker(desired_num_ticks=7),
-        title=f"{heatmap_label} ({heatmap_unit})",
-        label_standoff=8,
-    )
-    plot.state.add_layout(color_bar, "right")
-    plot.state._orderbook_colorbar_added = True
+        for plot_label in selected_plot_labels:
+            plot_type = next(key for key, value in PLOT_LABELS.items() if value == plot_label)
+            missing_trade_support = plot_type != "orderbook" and any(plot_type not in payload["available_views"] for payload in payloads)
+            if missing_trade_support:
+                plot_panes.append(
+                    pn.pane.Alert(
+                        f"{plot_label} is unavailable because one or more selected datasets use the old schema.",
+                        alert_type="warning",
+                    )
+                )
+                continue
 
+            try:
+                plot_panes.append(self._build_plot_pane(plot_type, payloads))
+            except Exception as error:
+                plot_panes.append(
+                    pn.pane.Alert(
+                        f"Failed to render {plot_label}: {error}",
+                        alert_type="danger",
+                    )
+                )
 
-def build_layout():
-    raw_bid = pd.DataFrame({"Time": [], "bid": []})
-    raw_ask = pd.DataFrame({"Time": [], "ask": []})
-    raw_mid = pd.DataFrame({"Time": [], "mid": []})
-    raw_time_axis = None
-    raw_price_axis = None
-    raw_volume = None
+        self.plot_area.objects = plot_panes or [pn.pane.Markdown("No plots are available for the current selection.")]
 
-    file_list, _ = search_data(path)
-
-    for file in file_list:
-        if file[0] != id:
-            continue
-
-        price_axis, time_axis, volume, bid, ask = load_data(path + file[2])
-        mid = 0.5 * (bid + ask)
-
-        raw_price_axis = price_axis
-        raw_time_axis = time_axis
-        raw_volume = volume
-        raw_bid = pd.concat([raw_bid, pd.DataFrame({"Time": time_axis, "bid": bid})], ignore_index=True)
-        raw_ask = pd.concat([raw_ask, pd.DataFrame({"Time": time_axis, "ask": ask})], ignore_index=True)
-        raw_mid = pd.concat([raw_mid, pd.DataFrame({"Time": time_axis, "mid": mid})], ignore_index=True)
-
-        break
-
-    if raw_bid.empty:
-        raise FileNotFoundError(f"No preprocessed data found for product id '{id}' in '{path}'.")
-
-    raw_bid.sort_values("Time", inplace=True)
-    raw_ask.sort_values("Time", inplace=True)
-    raw_mid.sort_values("Time", inplace=True)
-
-    end_time = raw_bid["Time"].iat[-1]
-    start_time = end_time - pd.Timedelta(seconds=init_time_interval)
-    end_mid = raw_mid["mid"].iat[-1]
-    start_price = end_mid - init_price_interval / 2
-    end_price = end_mid + init_price_interval / 2
-
-    default_range = ((start_time, end_time), (start_price, end_price))
-    range_stream = hv.streams.RangeXY()
-    get_canvas = partial(
-        get_canvas_full,
-        time_axis=raw_time_axis,
-        price_axis=raw_price_axis,
-        volume=raw_volume,
-        default_range=default_range,
-    )
-
-    heatmap = hv.DynamicMap(get_canvas, streams=[range_stream])
-    range_stream.source = heatmap
-
-    rasterized_heatmap = rasterize(heatmap, width=plot_width, height=plot_height, dynamic=True)
-    shaded_heatmap = shade(rasterized_heatmap, cmap=heatmap_colors, clims=heatmap_clim, cnorm="linear")
-    spread_heatmap = dynspread(shaded_heatmap, threshold=0.8, max_px=10)
-
-    get_bid = partial(get_price_line, raw=raw_bid, name="bid", color="#0FB353", default_range=(start_time, end_time))
-    get_ask = partial(get_price_line, raw=raw_ask, name="ask", color="#E23E1E", default_range=(start_time, end_time))
-    get_mid = partial(get_price_line, raw=raw_mid, name="mid", color="#3979B9", default_range=(start_time, end_time))
-
-    bid_line = hv.DynamicMap(get_bid, streams=[range_stream])
-    ask_line = hv.DynamicMap(get_ask, streams=[range_stream])
-    mid_line = hv.DynamicMap(get_mid, streams=[range_stream])
-
-    return (spread_heatmap * bid_line * ask_line * mid_line).opts(
-        width=2000,
-        height=800,
-        xlim=(start_time, end_time),
-        ylim=(start_price, end_price),
-        xlabel="Time",
-        ylabel="Price (USD)",
-        bgcolor="#081421",
-        hooks=[add_heatmap_colorbar],
-    )
+    def view(self):
+        controls = pn.Column(
+            "## Controls",
+            self.preprocessed_select,
+            self.raw_select,
+            self.plot_select,
+            self.preprocess_button,
+            self.refresh_button,
+            self.status,
+            width=420,
+            sizing_mode="stretch_height",
+        )
+        content = pn.Column(
+            "## Visualization",
+            self.plot_area,
+            sizing_mode="stretch_both",
+        )
+        return pn.Row(controls, content, sizing_mode="stretch_both")
 
 
-def main():
+def build_app():
     hv.extension("bokeh")
-    layout = build_layout()
-    pn.serve(layout, title="Orderbook Viewer")
+    pn.extension("plotly")
+    dashboard = OrderbookDashboard(RAW_DATA_DIR, PREPROCESSED_DIR)
+    return dashboard.view()
+
+
+def main() -> None:
+    pn.serve(build_app, title="Orderbook Viewer", show=True)
 
 
 if __name__ == "__main__":
