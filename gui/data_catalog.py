@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
+import zipfile
 from typing import Iterable
 
 import numpy as np
+
+from gui.registry import PLOT_REGISTRY
 
 
 RAW_LEVEL2_INIT_RE = re.compile(r"^level2-(?P<product_id>.+)-init-(?P<timestamp>\d{8}\.\d{6})\.csv$")
@@ -15,6 +18,10 @@ RAW_TRADE_RE = re.compile(r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6}
 PREPROCESSED_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-(?P<time_step>\d+(?:\.\d+)?)-orderbook_for_plot\.npz$"
 )
+
+
+class PreprocessedDataError(RuntimeError):
+    pass
 
 
 def parse_timestamp(timestamp: str) -> datetime:
@@ -67,15 +74,20 @@ def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
 
 
 def detect_available_views(path: Path) -> tuple[str, ...]:
-    with np.load(path, allow_pickle=False) as data:
-        if "available_views" in data.files:
-            return tuple(str(view) for view in data["available_views"].tolist())
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            if "available_views" in data.files:
+                return tuple(str(view) for view in data["available_views"].tolist())
+            data_keys = set(data.files)
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
 
-        trade_keys = {"trade_time", "trade_price", "trade_volume", "trade_side"}
-        if trade_keys.issubset(set(data.files)):
-            return ("orderbook", "trades_scatter", "trade_volume_timeline")
-
-    return ("orderbook",)
+    available_views = tuple(
+        key
+        for key, spec in PLOT_REGISTRY.items()
+        if set(spec.required_payload_keys).issubset(data_keys)
+    )
+    return available_views or ("orderbook",)
 
 
 def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedDataset]:
@@ -86,13 +98,18 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         if not match:
             continue
 
+        try:
+            available_views = detect_available_views(file_path)
+        except PreprocessedDataError:
+            continue
+
         datasets.append(
             PreprocessedDataset(
                 product_id=match.group("product_id"),
                 timestamp=match.group("timestamp"),
                 time_step=float(match.group("time_step")),
                 path=file_path,
-                available_views=detect_available_views(file_path),
+                available_views=available_views,
             )
         )
 
@@ -147,8 +164,11 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
 
 
 def load_preprocessed_payload(dataset: PreprocessedDataset) -> dict[str, object]:
-    with np.load(dataset.path, allow_pickle=False) as data:
-        payload = {key: data[key] for key in data.files}
+    try:
+        with np.load(dataset.path, allow_pickle=False) as data:
+            payload = {key: data[key] for key in data.files}
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise PreprocessedDataError(f"Failed to load {dataset.path.name}: {error}") from error
 
     payload["product_id"] = dataset.product_id
     payload["timestamp"] = dataset.timestamp
