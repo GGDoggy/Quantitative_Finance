@@ -1,9 +1,12 @@
 coinbase_advanced_py==1.8.2
 matplotlib==3.10.8
-numpy
-pandas
-datashader
-holoviews
-panel
 aiofiles
 aiocsv
+coinbase_advanced_py==1.8.2
+datashader
+holoviews
+matplotlib==3.10.8
+numpy
+panel
+pandas
+plotly

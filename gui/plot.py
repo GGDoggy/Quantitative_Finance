@@ -1,194 +1,213 @@
-from os import walk
-import numpy as np
-import datashader as ds
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import holoviews as hv
-import pandas as pd
 import panel as pn
-import matplotlib.colors as mcolors
-from holoviews.operation.datashader import dynspread
-from functools import partial
+from plotly.graph_objects import Figure
+
+from gui.data_catalog import PreprocessedDataError, discover_preprocessed_datasets, discover_raw_batches, load_preprocessed_payload
+from gui.registry import PLOT_LABELS, PLOT_REGISTRY
+from gui.preprocess_service import preprocess_batches
 
 
-def search_data(path: str):
-    for a, b, c in walk(path):
-        filelist = c
-        break
-    
-    file_list = []
-    ids = set()
-    for file in filelist:
-        split = file.split("-")
-        id = "-".join(split[:-3])
-        time_step = float(split[-2])
-        file_list.append((id, time_step, file))
-        ids.add(id)
-
-    return file_list, list(ids)
-
-def load_data(path: str):
-    data = np.load(path)
-    price_axis = data["price_axis"]
-    time_axis = data["time_axis"].astype(np.int64)
-    volume = data["data"].T
-    bid = data["bid"]
-    ask = data["ask"]
-    T, P = np.meshgrid(time_axis, price_axis)
-    volume = pd.DataFrame({"Time": T.flatten(), "Price": P.flatten(), "sumVolume": np.abs(volume).flatten(), "diffVolume": volume.flatten()})
-
-    return price_axis, time_axis, volume, bid, ask
-
-def compute_pixel(dataset):
-    sumVol = dataset.data.sumVol
-    diffVol = dataset.data.diffVol
-
-    ask = (sumVol + diffVol) * 0.5
-    bid = (sumVol - diffVol) * 0.5
-    volume = np.where(ask > bid, np.log1p(ask), -np.log1p(bid))
-
-    return hv.Image((dataset.data.Time.astype("datetime64[ns]"), dataset.data.Price, volume))
-
-def get_canvas_full(x_range, y_range, raw_volume, total_start_time, default_range):
-    if x_range is None or y_range is None:
-        x_range = default_range[0]
-        y_range = default_range[1]
-    start_time = pd.to_datetime(x_range[0]).timestamp() - total_start_time
-    end_time = pd.to_datetime(x_range[1]).timestamp() - total_start_time
-    canvas = ds.Canvas(plot_width=plot_width, plot_height=plot_height, y_range=y_range, x_range=(start_time, end_time))
-    agg_sum = canvas.points(raw_volume, "Time", "Price", ds.reductions.sum("sumVolume"))
-    agg_diff = canvas.points(raw_volume, "Time", "Price", ds.reductions.sum("diffVolume"))
-    plot_x = pd.to_datetime(agg_sum["Time"] + total_start_time, unit="s")
-    plot_y = agg_sum["Price"]
-    agg_sum = np.nan_to_num(agg_sum, nan=0.0)
-    agg_diff = np.nan_to_num(agg_diff, nan=0.0)
-    ask_volume = (agg_sum + agg_diff) * 0.5
-    bid_volume = (agg_sum - agg_diff) * 0.5
-    plot_z = np.where(ask_volume > bid_volume, np.log1p(ask_volume), -np.log1p(bid_volume))
-    plot_z.reshape((len(plot_x), len(plot_y)))
-
-    return hv.Image((plot_x, plot_y, plot_z))
-
-def get_price_line(x_range, y_range, raw, name, color, default_range):
-    if x_range is None or (x_range[0] is None):
-        x_range = default_range
-    
-    try:
-        s_val = x_range[0]
-        e_val = x_range[1]
-        
-        start_ts = pd.to_datetime(s_val).timestamp()
-        end_ts = pd.to_datetime(e_val).timestamp()
-        
-        time_array = raw["Time"].values.astype(float)
-        mask = (time_array >= start_ts) & (time_array <= end_ts)
-        keeping = raw.loc[mask]
-        
-        value_col = [c for c in raw.columns if c != "Time"][0]
-        
-        return hv.Curve(keeping, kdims=["Time"], vdims=[value_col], name=name).opts(
-            color=color, line_width=2
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "v3"
+PREPROCESSED_DIR = PROJECT_ROOT / "data" / "preprocessed"
+class OrderbookDashboard:
+    def __init__(self, raw_dir: Path, preprocessed_dir: Path) -> None:
+        self.raw_dir = raw_dir
+        self.preprocessed_dir = preprocessed_dir
+        self.preprocessed_by_label = {}
+        self.raw_by_label = {}
+        self.status = pn.pane.Alert("Ready.", alert_type="light", sizing_mode="stretch_width")
+        self.preprocessed_select = pn.widgets.MultiChoice(
+            name="Preprocessed datasets",
+            options=[],
+            sizing_mode="stretch_width",
+            min_height=180,
         )
-    except Exception as e:
-        print(f"Error in get_price_line: {e}")
-        return hv.Curve([], kdims=["Time"], vdims=["Value"], name=name)
-    
+        self.raw_select = pn.widgets.MultiChoice(
+            name="Raw batches pending preprocess",
+            options=[],
+            sizing_mode="stretch_width",
+            min_height=180,
+        )
+        self.plot_select = pn.widgets.MultiChoice(
+            name="Plots",
+            value=["Orderbook"],
+            options=list(PLOT_LABELS.values()),
+            sizing_mode="stretch_width",
+        )
+        self.refresh_button = pn.widgets.Button(name="Refresh Catalog", button_type="default", sizing_mode="stretch_width")
+        self.preprocess_button = pn.widgets.Button(name="Preprocess Selected", button_type="primary", sizing_mode="stretch_width")
+        self.plot_area = pn.Column(
+            pn.pane.Markdown("Select one or more preprocessed datasets to start plotting."),
+            sizing_mode="stretch_both",
+        )
+
+        self.refresh_button.on_click(self._handle_refresh)
+        self.preprocess_button.on_click(self._handle_preprocess)
+        self.preprocessed_select.param.watch(self._handle_selection_change, "value")
+        self.plot_select.param.watch(self._handle_selection_change, "value")
+
+        self.refresh_catalog()
+
+    def refresh_catalog(self) -> None:
+        datasets = discover_preprocessed_datasets(self.preprocessed_dir)
+        batches = discover_raw_batches(self.raw_dir, self.preprocessed_dir)
+        self.preprocessed_by_label = {dataset.display_name: dataset for dataset in datasets}
+        self.raw_by_label = {
+            batch.display_name: batch
+            for batch in batches
+            if not batch.is_preprocessed
+        }
+
+        existing_preprocessed = [label for label in self.preprocessed_select.value if label in self.preprocessed_by_label]
+        existing_raw = [label for label in self.raw_select.value if label in self.raw_by_label]
+
+        self.preprocessed_select.options = list(self.preprocessed_by_label.keys())
+        self.preprocessed_select.value = existing_preprocessed
+
+        self.raw_select.options = list(self.raw_by_label.keys())
+        self.raw_select.value = existing_raw
+
+        if not self.preprocessed_select.value and datasets:
+            self.preprocessed_select.value = [datasets[0].display_name]
+
+        self._render_plots()
+
+    def _set_status(self, message: str, level: str = "light") -> None:
+        self.status.object = message
+        self.status.alert_type = level
+
+    def _handle_refresh(self, _event) -> None:
+        self.refresh_catalog()
+        self._set_status("Catalog refreshed.", "success")
+
+    def _handle_preprocess(self, _event) -> None:
+        selected_batches = [self.raw_by_label[label] for label in self.raw_select.value if label in self.raw_by_label]
+        if not selected_batches:
+            self._set_status("Select at least one raw batch before preprocessing.", "warning")
+            return
+
+        self.preprocess_button.disabled = True
+        try:
+            progress_messages: list[str] = []
+
+            def update_progress(message: str) -> None:
+                progress_messages.append(message)
+                self._set_status("\n".join(progress_messages), "primary")
+
+            preprocess_batches(
+                selected_batches,
+                output_dir=self.preprocessed_dir,
+                progress_callback=update_progress,
+            )
+            self.refresh_catalog()
+            new_labels = [
+                dataset.display_name
+                for dataset in self.preprocessed_by_label.values()
+                if (dataset.product_id, dataset.timestamp) in {(batch.product_id, batch.timestamp) for batch in selected_batches}
+            ]
+            self.preprocessed_select.value = sorted(set(self.preprocessed_select.value + new_labels))
+            self._set_status(f"Preprocessed {len(selected_batches)} batch(es).", "success")
+        except Exception as error:
+            self._set_status(f"Preprocess failed: {error}", "danger")
+        finally:
+            self.preprocess_button.disabled = False
+
+    def _handle_selection_change(self, _event) -> None:
+        self._render_plots()
+
+    def _build_plot_pane(self, plot_type: str, payloads: list[dict[str, object]]):
+        builder = PLOT_REGISTRY[plot_type].plot_builder
+        plot = builder(payloads)
+        if isinstance(plot, Figure):
+            return pn.pane.Plotly(plot, config={"responsive": True}, sizing_mode="stretch_width")
+        return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
+
+    def _render_plots(self) -> None:
+        selected_datasets = [self.preprocessed_by_label[label] for label in self.preprocessed_select.value if label in self.preprocessed_by_label]
+        selected_plot_labels = self.plot_select.value
+
+        if not selected_datasets:
+            self.plot_area.objects = [pn.pane.Markdown("Select one or more preprocessed datasets to start plotting.")]
+            return
+
+        if not selected_plot_labels:
+            self.plot_area.objects = [pn.pane.Markdown("Select at least one plot type.")]
+            return
+
+        product_ids = {dataset.product_id for dataset in selected_datasets}
+        if len(product_ids) != 1:
+            self.plot_area.objects = [pn.pane.Alert("Please select datasets from the same product for plotting.", alert_type="warning")]
+            return
+
+        try:
+            payloads = [load_preprocessed_payload(dataset) for dataset in selected_datasets]
+        except PreprocessedDataError as error:
+            self.plot_area.objects = [pn.pane.Alert(str(error), alert_type="danger")]
+            return
+        plot_panes = []
+
+        for plot_label in selected_plot_labels:
+            plot_type = next(key for key, value in PLOT_LABELS.items() if value == plot_label)
+            if any(plot_type not in payload["available_views"] for payload in payloads):
+                plot_panes.append(
+                    pn.pane.Alert(
+                        f"{plot_label} is unavailable because one or more selected datasets do not advertise that view.",
+                        alert_type="warning",
+                    )
+                )
+                continue
+
+            try:
+                plot_panes.append(self._build_plot_pane(plot_type, payloads))
+            except Exception as error:
+                plot_panes.append(
+                    pn.pane.Alert(
+                        f"Failed to render {plot_label}: {error}",
+                        alert_type="danger",
+                    )
+                )
+
+        self.plot_area.objects = plot_panes or [pn.pane.Markdown("No plots are available for the current selection.")]
+
+    def view(self):
+        controls = pn.Column(
+            "## Controls",
+            self.preprocessed_select,
+            self.raw_select,
+            self.plot_select,
+            self.preprocess_button,
+            self.refresh_button,
+            self.status,
+            width=420,
+            sizing_mode="stretch_height",
+        )
+        content = pn.Column(
+            "## Visualization",
+            self.plot_area,
+            sizing_mode="stretch_both",
+        )
+        return pn.Row(controls, content, sizing_mode="stretch_both")
 
 
-time_step = 0.01
-path = "data/preprocessed/"
-id = "ETH-USD"
-init_price_interval = 5
-init_time_interval = 30
-plot_width = 1000
-plot_height = 200
+def build_app():
+    hv.extension("bokeh")
+    pn.extension("plotly")
+    dashboard = OrderbookDashboard(RAW_DATA_DIR, PREPROCESSED_DIR)
+    return dashboard.view()
 
 
-raw_volume = pd.DataFrame({"Time": [], "Price": [], "sumVolume": [], "diffVolume": []})
-raw_bid = pd.DataFrame({"Time": [], "bid": []})
-raw_ask = pd.DataFrame({"Time": [], "ask": []})
-raw_mid = pd.DataFrame({"Time": [], "mid": []})
-
-file_list, ids = search_data(path)
-
-# Load data
-for file in file_list:
-    if file[0] != id:
-        continue
-        
-    price_axis, time_axis, volume, bid, ask = load_data(path + file[2])
-    mid = 0.5 * (bid + ask)
-
-    raw_volume = pd.concat([raw_volume, volume])
-    raw_bid = pd.concat([raw_bid, pd.DataFrame({"Time": time_axis, "bid": bid})])
-    raw_ask = pd.concat([raw_ask, pd.DataFrame({"Time": time_axis, "ask": ask})])
-    raw_mid = pd.concat([raw_mid, pd.DataFrame({"Time": time_axis, "mid": mid})])
+def main() -> None:
+    pn.serve(build_app, title="Orderbook Viewer", show=True)
 
 
-    break
-
-
-
-# Sort data by time
-raw_bid.sort_values("Time", inplace=True)
-raw_ask.sort_values("Time", inplace=True)
-raw_mid.sort_values("Time", inplace=True)
-
-# Calculate init axis range
-total_start_time = raw_bid["Time"][0]
-end_time = raw_bid["Time"].iat[-1]
-start_time = int(end_time - init_time_interval * 1e9)
-end_mid = raw_mid["mid"].iat[-1]
-start_price = end_mid - init_price_interval / 2
-end_price = end_mid + init_price_interval / 2
-start_time = pd.to_datetime(start_time, unit="ns")
-end_time = pd.to_datetime(end_time, unit="ns")
-
-# Dynamic plot
-raw_volume["Time"] -= total_start_time
-raw_volume["Time"] /= 1e9
-range_stream = hv.streams.RangeXY()
-get_canvas = partial(get_canvas_full, raw_volume=raw_volume, total_start_time=total_start_time/1e9, default_range=((start_time, end_time), (start_price, end_price)))
-plot = hv.DynamicMap(get_canvas, streams=[range_stream])
-plot = dynspread(plot, threshold=0.8, max_px=10)
-range_stream.source = plot
-
-# Prepare price line data
-# raw_bid["Time"] /= 1e9
-# raw_ask["Time"] /= 1e9
-# raw_mid["Time"] /= 1e9
-# get_bid = partial(get_price_line, raw=raw_bid, name="bid", color='#00FF00', default_range=(start_time, end_time))
-# get_ask = partial(get_price_line, raw=raw_ask, name="ask", color='#FF0000', default_range=(start_time, end_time))
-# get_mid = partial(get_price_line, raw=raw_mid, name="mid", color='#00949B', default_range=(start_time, end_time))
-
-# Plot
-hv.extension("bokeh")
-# bid_line = hv.DynamicMap(get_bid, streams=[range_stream])
-# ask_line = hv.DynamicMap(get_ask, streams=[range_stream])
-# mid_line = hv.DynamicMap(get_mid, streams=[range_stream])
-
-# Custom color map
-colors = ["#0058FF", "#E7E7E7", "#FF6F06"]
-custom_cmap = mcolors.LinearSegmentedColormap.from_list("black_rainbow", colors, N=256)
-
-
-# agg = rasterize(
-#     hv.Points(raw_volume, kdims=['Time', 'Price'], vdims=['sumVolume', 'diffVolume']),
-#     aggregator=ds.summary(sumVol=ds.sum('sumVolume'), diffVol=ds.sum('diffVolume'))
-# )
-# dynamic_img = agg.apply(compute_pixel)
-# colors = ["#0058FF", "#E7E7E7", "#FF6F06"]
-# custom_cmap = mcolors.LinearSegmentedColormap.from_list("black_rainbow", colors, N=256)
-# final_plot = dynamic_img.opts(
-#     width=plot_width, 
-#     height=plot_height,
-#     colorbar=True,
-#     cmap=custom_cmap,
-#     clim=(-10, 10)
-# )
-
-
-# Layout
-# max_val = np.max(np.abs(plot_z))
-plot.opts(width=2000, height=800, colorbar=True, cmap=custom_cmap, clim=(-10, 10))
-# layout = pn.Column(plot)
-layout = (plot).opts(xlim=(start_time, end_time), ylim=(start_price, end_price))
-pn.serve(layout, show=True, title="Orderbook Viewer")
+if __name__ == "__main__":
+    main()

@@ -1,2 +1,5 @@
 *.png
 /.vscode
+__pycache__/
+*.pyc
+.codex_tmp
