@@ -6,7 +6,12 @@ from typing import Callable
 
 import numpy as np
 
-from gui.data_catalog import PreprocessedDataset, RawBatch, discover_preprocessed_datasets
+from gui.data_catalog import (
+    PreprocessedDataset,
+    RawBatch,
+    discover_preprocessed_datasets,
+    format_time_step,
+)
 from gui.preprocess.common import build_context
 from gui.registry import PLOT_REGISTRY
 
@@ -47,8 +52,16 @@ def preprocess_batch(
         available_views.append(plot_key)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{batch.product_id}-{batch.timestamp}-{time_step}-orderbook_for_plot.npz"
-    with tempfile.NamedTemporaryFile(dir=output_dir, prefix=output_path.stem + "-", suffix=".npz", delete=False) as temp_file:
+    normalized_time_step = format_time_step(time_step)
+    output_path = output_dir / (
+        f"{batch.product_id}-{batch.timestamp}-{normalized_time_step}-orderbook_for_plot.npz"
+    )
+    with tempfile.NamedTemporaryFile(
+        dir=output_dir,
+        prefix=output_path.stem + "-",
+        suffix=".npz",
+        delete=False,
+    ) as temp_file:
         temp_path = Path(temp_file.name)
 
     try:

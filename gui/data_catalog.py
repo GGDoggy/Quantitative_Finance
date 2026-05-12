@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 import zipfile
@@ -16,12 +17,29 @@ RAW_LEVEL2_INIT_RE = re.compile(r"^level2-(?P<product_id>.+)-init-(?P<timestamp>
 RAW_LEVEL2_UPDATES_RE = re.compile(r"^level2-(?P<product_id>.+)-updates-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 RAW_TRADE_RE = re.compile(r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 PREPROCESSED_RE = re.compile(
-    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-(?P<time_step>\d+(?:\.\d+)?)-orderbook_for_plot\.npz$"
+    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
+    r"(?P<time_step>\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)-orderbook_for_plot\.npz$"
 )
 
 
 class PreprocessedDataError(RuntimeError):
     pass
+
+
+def format_time_step(time_step: float | str | Decimal) -> str:
+    """Return a stable decimal representation for filenames and labels."""
+    try:
+        decimal_value = Decimal(str(time_step))
+    except InvalidOperation as error:
+        raise ValueError(f"Invalid time step: {time_step!r}") from error
+
+    if not decimal_value.is_finite() or decimal_value <= 0:
+        raise ValueError(f"Time step must be a positive finite value: {time_step!r}")
+
+    normalized = decimal_value.normalize()
+    if normalized == normalized.to_integral():
+        return format(normalized, "f")
+    return format(normalized, "f").rstrip("0").rstrip(".")
 
 
 def parse_timestamp(timestamp: str) -> datetime:
@@ -64,7 +82,7 @@ class PreprocessedDataset:
     def display_name(self) -> str:
         formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         views = ",".join(self.available_views)
-        return f"{self.product_id} | {formatted} | {self.time_step:.2f}s | {views}"
+        return f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s | {views}"
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
