@@ -47,13 +47,10 @@
 
 # 依賴現況
 
-`requirements.txt` 目前只列出:
+`requirements.txt` 目前列出:
 
 - `coinbase_advanced_py==1.8.2`
 - `matplotlib==3.10.8`
-
-但實際程式還使用了下列套件，尚未寫進 `requirements.txt`:
-
 - `numpy`
 - `pandas`
 - `datashader`
@@ -68,4 +65,5 @@
 - `server/websocket.py` 的輸出檔名不含資料夾路徑，執行位置會直接影響檔案落點。
 - `gui/plot.py` 與 `gui/preprocess.py` 都有多個硬編碼路徑與參數，較像研究腳本，不是可配置 CLI。
 - `test/plot_v1.py` 內有明顯的 f-string 引號問題，檔案目前看起來不能直接執行。
+- 不要讀取 `data/` 和 `fig/` 內的檔案內容，只能查看這兩個目錄的資料夾結構。
 - 專案中存在不少產出檔與資料檔，後續若要重構，應先區分「原始資料」、「中繼資料」與「輸出圖檔」。
