@@ -151,6 +151,9 @@ def simulate_virtual_best_orders(
             )
 
             if event_type == "trade":
+                if event_time < simulation_start:
+                    continue
+
                 append_trade_evidence(
                     pending_trade_evidence,
                     event_side,
