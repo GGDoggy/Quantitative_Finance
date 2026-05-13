@@ -773,11 +773,8 @@ def simulate_virtual_best_orders(
             previous_ask_index = best_ask_index
 
             updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
-            best_bid_index, best_ask_index = refresh_best_indices(
-                orderbook,
-                best_bid_index,
-                best_ask_index,
-            )
+            best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
+            best_ask_index = advance_best_ask_index(orderbook, updated_index, best_ask_index)
 
             current_bid_price, current_bid_size, current_ask_price, current_ask_size = get_best_levels_from_indices(
                 orderbook,
