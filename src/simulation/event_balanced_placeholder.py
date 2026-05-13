@@ -13,6 +13,7 @@ from .time_averaged_random_cancellation import (
     get_orders_bucket,
     initialize_best_indices,
     reconcile_one_side,
+    side_to_trade_key,
     unix_to_daily_seconds,
     update_orderbook,
 )
@@ -152,6 +153,12 @@ def simulate_virtual_best_orders(
 
             if event_type == "trade":
                 if event_time <= simulation_start and next_submit_time is not None:
+                    continue
+
+                trade_key = side_to_trade_key(event_side)
+                active_order = active_bid_order if trade_key == "bid" else active_ask_order
+                if active_order is None or active_order.result != -1:
+                    pending_trade_evidence[trade_key].clear()
                     continue
 
                 append_trade_evidence(
