@@ -356,23 +356,79 @@ def split_trade_evidence(records, book_side, level_price):
     )
 
 
-def reconcile_same_best_price(active_orders, size_delta, traded_at_level, event_time):
+def split_trade_evidence_since(records, book_side, level_price, min_event_time):
+    return split_trade_evidence(
+        [record for record in records if record.event_time >= min_event_time],
+        book_side,
+        level_price,
+    )
+
+
+def reconcile_same_best_price(
+    active_orders,
+    size_delta,
+    pending_trade_records,
+    book_side,
+    level_price,
+    update_event_time,
+):
     if not active_orders:
         return
 
-    if traded_at_level > 0:
-        apply_trade_volume(active_orders, traded_at_level, event_time)
-
-    residual = size_delta + traded_at_level
-    if not np.isclose(residual, 0.0):
-        apply_size_delta(active_orders, residual)
-
-
-def reconcile_price_change(active_orders, has_sweep_evidence, event_time):
     for order in active_orders:
         if order.result != -1:
             continue
-        finalize_order(order, event_time, 1 if has_sweep_evidence else 0)
+
+        (
+            traded_at_level,
+            traded_at_level_time,
+            _traded_through_level,
+            _traded_through_level_time,
+        ) = split_trade_evidence_since(
+            pending_trade_records,
+            book_side,
+            level_price,
+            order.submit_time,
+        )
+        if traded_at_level > 0:
+            apply_trade_volume(
+                [order],
+                traded_at_level,
+                traded_at_level_time if traded_at_level_time is not None else update_event_time,
+            )
+
+        residual = size_delta + traded_at_level
+        if not np.isclose(residual, 0.0):
+            apply_size_delta([order], residual)
+
+
+def reconcile_price_change(
+    active_orders,
+    pending_trade_records,
+    book_side,
+    level_price,
+    update_event_time,
+):
+    for order in active_orders:
+        if order.result != -1:
+            continue
+
+        (
+            _traded_at_level,
+            _traded_at_level_time,
+            traded_through_level,
+            traded_through_level_time,
+        ) = split_trade_evidence_since(
+            pending_trade_records,
+            book_side,
+            level_price,
+            order.submit_time,
+        )
+        finalize_order(
+            order,
+            traded_through_level_time if traded_through_level_time is not None else update_event_time,
+            1 if traded_through_level > 0 else 0,
+        )
 
 
 def reconcile_one_side(
@@ -395,32 +451,34 @@ def reconcile_one_side(
     if best_price_unchanged and best_size_unchanged:
         return False
 
-    (
-        traded_at_level,
-        traded_at_level_time,
-        traded_through_level,
-        traded_through_level_time,
-    ) = split_trade_evidence(pending_trade_records, book_side, previous_best_price)
-
     if best_price_unchanged:
         reconcile_same_best_price(
             orders_at_previous_best,
             current_best_size - previous_best_size,
-            traded_at_level,
-            traded_at_level_time if traded_at_level_time is not None else update_event_time,
+            pending_trade_records,
+            book_side,
+            previous_best_price,
+            update_event_time,
         )
         return True
 
     if is_worse_best_price_change(book_side, previous_best_price, current_best_price):
-        has_sweep_evidence = traded_through_level > 0
         reconcile_price_change(
             orders_at_previous_best,
-            has_sweep_evidence,
-            traded_through_level_time if traded_through_level_time is not None else update_event_time,
+            pending_trade_records,
+            book_side,
+            previous_best_price,
+            update_event_time,
         )
         return True
 
-    reconcile_price_change(orders_at_previous_best, False, update_event_time)
+    reconcile_price_change(
+        orders_at_previous_best,
+        [],
+        book_side,
+        previous_best_price,
+        update_event_time,
+    )
     return True
 
 
