@@ -1,10 +1,21 @@
 import calendar
+import os
 import csv
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
+
+
+DATA_V3_PATH = Path("data/v3")
+OUTPUT_PATH = Path("data/preprocessed")
+DEFAULT_TIME_STEP = 0.01
+DEFAULT_BASE_TICK = 0.00000001
+OUTPUT_SUFFIX = "simulation-time_averaged_random_cancelation"
+DEBUG_BEST_STATE = os.environ.get("DEBUG_BEST_STATE", "").lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -56,32 +67,153 @@ def same_price(lhs, rhs):
     return np.isclose(lhs, rhs)
 
 
+def get_price_index(price_levels, price):
+    return int(np.searchsorted(price_levels, price))
+
+
 def update_orderbook(orderbook, price_levels, price, volume, side):
-    ind = np.searchsorted(price_levels, price)
-    orderbook[ind] = volume * side * -1
+    price_index = get_price_index(price_levels, price)
+    orderbook[price_index] = volume * side * -1
+    return price_index, orderbook[price_index]
 
 
-def get_best_levels(orderbook, price_levels):
-    bid_indices = np.where(orderbook < 0)[0]
-    ask_indices = np.where(orderbook > 0)[0]
+def initialize_best_indices(orderbook):
+    best_bid_index = None
+    best_ask_index = None
 
-    if len(bid_indices) == 0:
+    for index in range(len(orderbook) - 1, -1, -1):
+        if orderbook[index] < 0:
+            best_bid_index = index
+            break
+
+    for index in range(len(orderbook)):
+        if orderbook[index] > 0:
+            best_ask_index = index
+            break
+
+    return best_bid_index, best_ask_index
+
+
+def has_valid_bid_at_index(orderbook, price_index):
+    return price_index is not None and orderbook[price_index] < 0
+
+
+def has_valid_ask_at_index(orderbook, price_index):
+    return price_index is not None and orderbook[price_index] > 0
+
+
+def refresh_best_indices(orderbook, best_bid_index, best_ask_index):
+    if has_valid_bid_at_index(orderbook, best_bid_index) and has_valid_ask_at_index(orderbook, best_ask_index):
+        return best_bid_index, best_ask_index
+    return initialize_best_indices(orderbook)
+
+
+def advance_best_bid_index(orderbook, updated_index, current_best_index):
+    if current_best_index is None:
+        if orderbook[updated_index] < 0:
+            return updated_index
+        return None
+
+    if updated_index > current_best_index and orderbook[updated_index] < 0:
+        return updated_index
+
+    if updated_index != current_best_index:
+        return current_best_index
+
+    if orderbook[current_best_index] < 0:
+        return current_best_index
+
+    for index in range(current_best_index - 1, -1, -1):
+        if orderbook[index] < 0:
+            return index
+    return None
+
+
+def advance_best_ask_index(orderbook, updated_index, current_best_index):
+    if current_best_index is None:
+        if orderbook[updated_index] > 0:
+            return updated_index
+        return None
+
+    if updated_index < current_best_index and orderbook[updated_index] > 0:
+        return updated_index
+
+    if updated_index != current_best_index:
+        return current_best_index
+
+    if orderbook[current_best_index] > 0:
+        return current_best_index
+
+    for index in range(current_best_index + 1, len(orderbook)):
+        if orderbook[index] > 0:
+            return index
+    return None
+
+
+def get_best_levels_from_indices(orderbook, price_levels, best_bid_index, best_ask_index):
+    if best_bid_index is None:
         best_bid_price = np.nan
         best_bid_size = 0.0
     else:
-        bid_index = bid_indices[-1]
-        best_bid_price = price_levels[bid_index]
-        best_bid_size = -orderbook[bid_index]
+        best_bid_price = price_levels[best_bid_index]
+        best_bid_size = -orderbook[best_bid_index]
 
-    if len(ask_indices) == 0:
+    if best_ask_index is None:
         best_ask_price = np.nan
         best_ask_size = 0.0
     else:
-        ask_index = ask_indices[0]
-        best_ask_price = price_levels[ask_index]
-        best_ask_size = orderbook[ask_index]
+        best_ask_price = price_levels[best_ask_index]
+        best_ask_size = orderbook[best_ask_index]
 
     return best_bid_price, best_bid_size, best_ask_price, best_ask_size
+
+
+def debug_best_state(
+    stage,
+    orderbook,
+    price_levels,
+    best_bid_index,
+    best_ask_index,
+    best_bid_price,
+    best_bid_size,
+    best_ask_price,
+    best_ask_size,
+    event_time=None,
+    event_type=None,
+    event_price=None,
+    event_volume=None,
+    event_side=None,
+    updated_index=None,
+):
+    if not DEBUG_BEST_STATE:
+        return
+
+    bid_raw = None if best_bid_index is None else float(orderbook[best_bid_index])
+    ask_raw = None if best_ask_index is None else float(orderbook[best_ask_index])
+    bid_invalid = best_bid_index is not None and bid_raw >= 0.0
+    ask_invalid = best_ask_index is not None and ask_raw <= 0.0
+
+    if not (bid_invalid or ask_invalid):
+        return
+
+    print(
+        "[DEBUG_BEST_STATE]",
+        f"stage={stage}",
+        f"time={event_time}",
+        f"event_type={event_type}",
+        f"event_side={event_side}",
+        f"event_price={event_price}",
+        f"event_volume={event_volume}",
+        f"updated_index={updated_index}",
+        f"bid_index={best_bid_index}",
+        f"bid_price={best_bid_price}",
+        f"bid_size={best_bid_size}",
+        f"bid_raw={bid_raw}",
+        f"ask_index={best_ask_index}",
+        f"ask_price={best_ask_price}",
+        f"ask_size={best_ask_size}",
+        f"ask_raw={ask_raw}",
+    )
 
 
 def build_event_stream(updates, trades):
@@ -142,8 +274,16 @@ def finalize_order(order, end_time, result):
     order.behind = max(order.behind, 0.0)
 
 
-def get_active_orders_at_price(active_orders, price):
-    return [order for order in active_orders if order.result == -1 and same_price(order.price, price)]
+def get_orders_bucket(orders_by_price, price_index):
+    if price_index is None:
+        return []
+    return orders_by_price.setdefault(price_index, [])
+
+
+def get_active_orders_at_index(orders_by_price, price_index):
+    if price_index is None:
+        return []
+    return [order for order in orders_by_price.get(price_index, []) if order.result == -1]
 
 
 def apply_size_delta(active_orders, delta):
@@ -243,7 +383,8 @@ def reconcile_price_change(active_orders, has_sweep_evidence, event_time):
 
 def reconcile_one_side(
     book_side,
-    active_orders,
+    orders_by_price,
+    previous_best_index,
     previous_best_price,
     previous_best_size,
     current_best_price,
@@ -251,10 +392,10 @@ def reconcile_one_side(
     pending_trade_records,
     update_event_time,
 ):
-    if np.isnan(previous_best_price):
+    if previous_best_index is None or np.isnan(previous_best_price):
         return False
 
-    orders_at_previous_best = get_active_orders_at_price(active_orders, previous_best_price)
+    orders_at_previous_best = get_active_orders_at_index(orders_by_price, previous_best_index)
     best_price_unchanged = same_price(previous_best_price, current_best_price)
     best_size_unchanged = np.isclose(previous_best_size, current_best_size)
     if best_price_unchanged and best_size_unchanged:
@@ -324,6 +465,219 @@ def empty_outputs():
     )
 
 
+def parse_dataset_groups(data_v3_path):
+    grouped = {}
+    for path in sorted(Path(data_v3_path).glob("*.csv")):
+        stem_parts = path.stem.split("-")
+        if len(stem_parts) < 4:
+            continue
+
+        if stem_parts[0] == "level2" and stem_parts[-2] in {"init", "updates"}:
+            data_type = stem_parts[-2]
+            timestamp = stem_parts[-1]
+            product_id = "-".join(stem_parts[1:-2])
+        elif stem_parts[0] == "trade":
+            data_type = "trade"
+            timestamp = stem_parts[-1]
+            product_id = "-".join(stem_parts[1:-1])
+        else:
+            continue
+
+        key = (product_id, timestamp)
+        grouped.setdefault(
+            key,
+            {
+                "product_id": product_id,
+                "timestamp": timestamp,
+                "file_stem": f"{product_id}-{timestamp}",
+            },
+        )[data_type] = path
+
+    available = []
+    for dataset in grouped.values():
+        if {"init", "updates", "trade"} <= dataset.keys():
+            available.append(dataset)
+    return sorted(available, key=lambda item: (item["product_id"], item["timestamp"]))
+
+
+def build_output_path(output_path, product_id, timestamp, time_step):
+    filename = f"{product_id}-{timestamp}-{time_step}-{OUTPUT_SUFFIX}.npz"
+    return Path(output_path) / filename
+
+
+def is_processed(dataset, output_path, time_step):
+    return build_output_path(output_path, dataset["product_id"], dataset["timestamp"], time_step).exists()
+
+
+def load_dataset(dataset):
+    init = read_csv(dataset["init"])
+    updates = read_csv(dataset["updates"])
+    trades = read_csv(dataset["trade"])
+    start_time = file_time_to_unix(dataset["timestamp"])
+    return init, updates, trades, start_time
+
+
+def run_dataset_simulation(dataset, time_step, base_tick):
+    init, updates, trades, start_time = load_dataset(dataset)
+    return simulate_virtual_best_orders(
+        init,
+        updates,
+        trades,
+        start_time,
+        time_step=time_step,
+        base_tick=base_tick,
+    )
+
+
+def process_dataset_job(dataset, output_path, time_step, base_tick):
+    result = run_dataset_simulation(dataset, time_step, base_tick)
+    output_file = save_simulation_npz(dataset, output_path, time_step, base_tick, result)
+    return {
+        "file_stem": dataset["file_stem"],
+        "output_file": str(output_file),
+        "status": "saved",
+    }
+
+
+def save_simulation_npz(dataset, output_path, time_step, base_tick, result):
+    output_file = build_output_path(output_path, dataset["product_id"], dataset["timestamp"], time_step)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    (
+        bid_prices,
+        bid_near_size,
+        bid_opp_size,
+        bid_survival_time,
+        bid_ahead,
+        bid_behind,
+        bid_vorder_ratio,
+        bid_result,
+        ask_prices,
+        ask_near_size,
+        ask_opp_size,
+        ask_survival_time,
+        ask_ahead,
+        ask_behind,
+        ask_vorder_ratio,
+        ask_result,
+    ) = result
+
+    np.savez_compressed(
+        output_file,
+        product_id=dataset["product_id"],
+        file_stem=dataset["file_stem"],
+        time_step=time_step,
+        base_tick=base_tick,
+        bid_prices=bid_prices,
+        bid_near_size=bid_near_size,
+        bid_opp_size=bid_opp_size,
+        bid_survival_time=bid_survival_time,
+        bid_ahead=bid_ahead,
+        bid_behind=bid_behind,
+        bid_vorder_ratio=bid_vorder_ratio,
+        bid_result=bid_result,
+        ask_prices=ask_prices,
+        ask_near_size=ask_near_size,
+        ask_opp_size=ask_opp_size,
+        ask_survival_time=ask_survival_time,
+        ask_ahead=ask_ahead,
+        ask_behind=ask_behind,
+        ask_vorder_ratio=ask_vorder_ratio,
+        ask_result=ask_result,
+    )
+    return output_file
+
+
+def format_dataset_line(index, dataset, output_path, time_step):
+    output_file = build_output_path(output_path, dataset["product_id"], dataset["timestamp"], time_step)
+    return f"[{index}] {dataset['file_stem']} -> {output_file.name}"
+
+
+def parse_selection(selection, dataset_count):
+    selection = selection.strip().lower()
+    if selection == "all":
+        return list(range(dataset_count))
+
+    chosen = []
+    for token in selection.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if not token.isdigit():
+            raise ValueError(f"Invalid selection token: {token}")
+        index = int(token) - 1
+        if index < 0 or index >= dataset_count:
+            raise ValueError(f"Selection out of range: {token}")
+        chosen.append(index)
+
+    if not chosen:
+        raise ValueError("No dataset selected.")
+    return sorted(set(chosen))
+
+
+def prompt_dataset_selection(datasets, output_path, time_step):
+    print("Available unprocessed datasets:")
+    for index, dataset in enumerate(datasets, start=1):
+        print(format_dataset_line(index, dataset, output_path, time_step))
+    print("Enter a number, comma-separated numbers, or 'all'.")
+
+    while True:
+        raw = input("Selection: ")
+        try:
+            selected_indices = parse_selection(raw, len(datasets))
+            return [datasets[index] for index in selected_indices]
+        except ValueError as exc:
+            print(exc)
+
+
+def get_default_worker_count(task_count):
+    cpu_count = os.cpu_count() or 1
+    return max(1, min(task_count, cpu_count))
+
+
+def run_datasets_in_parallel(selected, output_path, time_step, base_tick):
+    worker_count = get_default_worker_count(len(selected))
+    failures = []
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        future_to_dataset = {
+            executor.submit(process_dataset_job, dataset, output_path, time_step, base_tick): dataset
+            for dataset in selected
+        }
+        for future in as_completed(future_to_dataset):
+            dataset = future_to_dataset[future]
+            try:
+                job_result = future.result()
+                print(f"Saved {job_result['output_file']}")
+            except Exception as exc:
+                print(f"Failed {dataset['file_stem']}: {exc}")
+                failures.append((dataset["file_stem"], exc))
+
+    if failures:
+        failed_stems = ", ".join(file_stem for file_stem, _exc in failures)
+        raise RuntimeError(f"Batch processing failed for: {failed_stems}")
+
+
+def run_cli(data_v3_path=DATA_V3_PATH, output_path=OUTPUT_PATH, time_step=DEFAULT_TIME_STEP, base_tick=DEFAULT_BASE_TICK):
+    datasets = parse_dataset_groups(data_v3_path)
+    pending = [dataset for dataset in datasets if not is_processed(dataset, output_path, time_step)]
+
+    if not pending:
+        print("No unprocessed datasets found.")
+        return
+
+    selected = prompt_dataset_selection(pending, output_path, time_step)
+    if len(selected) == 1:
+        dataset = selected[0]
+        print(f"Processing {dataset['file_stem']}...")
+        result = run_dataset_simulation(dataset, time_step, base_tick)
+        output_file = save_simulation_npz(dataset, output_path, time_step, base_tick, result)
+        print(f"Saved {output_file}")
+        return
+
+    print(f"Processing {len(selected)} datasets with {get_default_worker_count(len(selected))} workers...")
+    run_datasets_in_parallel(selected, output_path, time_step, base_tick)
+
+
 def simulate_virtual_best_orders(
     init,
     updates,
@@ -339,6 +693,8 @@ def simulate_virtual_best_orders(
     orderbook = np.zeros(len(price_levels), dtype=float)
     for level in init:
         update_orderbook(orderbook, price_levels, level[0], level[1], level[2])
+
+    best_bid_index, best_ask_index = initialize_best_indices(orderbook)
 
     orderbook_start_time = min(update[0] for update in updates) if updates else unix_to_daily_seconds(start_time)
     orderbook_end_time = max(update[0] for update in updates) if updates else orderbook_start_time
@@ -359,8 +715,8 @@ def simulate_virtual_best_orders(
     next_submit_time = simulation_start
     pending_trade_evidence = {"bid": [], "ask": []}
 
-    bid_orders = []
-    ask_orders = []
+    bid_orders_by_price = {}
+    ask_orders_by_price = {}
 
     while event_index < len(events) or next_submit_time <= simulation_end:
         next_event_time = events[event_index][0] if event_index < len(events) else float("inf")
@@ -376,7 +732,28 @@ def simulate_virtual_best_orders(
             ) = events[event_index]
             event_index += 1
 
-            best_bid_price, best_bid_size, best_ask_price, best_ask_size = get_best_levels(orderbook, price_levels)
+            best_bid_price, best_bid_size, best_ask_price, best_ask_size = get_best_levels_from_indices(
+                orderbook,
+                price_levels,
+                best_bid_index,
+                best_ask_index,
+            )
+            debug_best_state(
+                "before_event",
+                orderbook,
+                price_levels,
+                best_bid_index,
+                best_ask_index,
+                best_bid_price,
+                best_bid_size,
+                best_ask_price,
+                best_ask_size,
+                event_time=event_time,
+                event_type=event_type,
+                event_price=event_price,
+                event_volume=event_volume,
+                event_side=event_side,
+            )
 
             if event_type == "trade":
                 append_trade_evidence(
@@ -392,16 +769,41 @@ def simulate_virtual_best_orders(
             previous_bid_size = best_bid_size
             previous_ask_price = best_ask_price
             previous_ask_size = best_ask_size
+            previous_bid_index = best_bid_index
+            previous_ask_index = best_ask_index
 
-            update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
+            updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
+            best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
+            best_ask_index = advance_best_ask_index(orderbook, updated_index, best_ask_index)
 
-            current_bid_price, current_bid_size, current_ask_price, current_ask_size = get_best_levels(
-                orderbook, price_levels
+            current_bid_price, current_bid_size, current_ask_price, current_ask_size = get_best_levels_from_indices(
+                orderbook,
+                price_levels,
+                best_bid_index,
+                best_ask_index,
+            )
+            debug_best_state(
+                "after_update",
+                orderbook,
+                price_levels,
+                best_bid_index,
+                best_ask_index,
+                current_bid_price,
+                current_bid_size,
+                current_ask_price,
+                current_ask_size,
+                event_time=event_time,
+                event_type=event_type,
+                event_price=event_price,
+                event_volume=event_volume,
+                event_side=event_side,
+                updated_index=updated_index,
             )
 
             bid_consumed = reconcile_one_side(
                 "bid",
-                bid_orders,
+                bid_orders_by_price,
+                previous_bid_index,
                 previous_bid_price,
                 previous_bid_size,
                 current_bid_price,
@@ -411,7 +813,8 @@ def simulate_virtual_best_orders(
             )
             ask_consumed = reconcile_one_side(
                 "ask",
-                ask_orders,
+                ask_orders_by_price,
+                previous_ask_index,
                 previous_ask_price,
                 previous_ask_size,
                 current_ask_price,
@@ -429,7 +832,25 @@ def simulate_virtual_best_orders(
         if next_submit_time > simulation_end:
             break
 
-        best_bid_price, best_bid_size, best_ask_price, best_ask_size = get_best_levels(orderbook, price_levels)
+        best_bid_price, best_bid_size, best_ask_price, best_ask_size = get_best_levels_from_indices(
+            orderbook,
+            price_levels,
+            best_bid_index,
+            best_ask_index,
+        )
+        debug_best_state(
+            "before_submit",
+            orderbook,
+            price_levels,
+            best_bid_index,
+            best_ask_index,
+            best_bid_price,
+            best_bid_size,
+            best_ask_price,
+            best_ask_size,
+            event_time=next_submit_time,
+            event_type="submit",
+        )
 
         bid_order = create_virtual_order(
             best_bid_size,
@@ -439,7 +860,7 @@ def simulate_virtual_best_orders(
             base_tick,
         )
         if bid_order is not None:
-            bid_orders.append(bid_order)
+            get_orders_bucket(bid_orders_by_price, best_bid_index).append(bid_order)
 
         ask_order = create_virtual_order(
             best_ask_size,
@@ -449,9 +870,12 @@ def simulate_virtual_best_orders(
             base_tick,
         )
         if ask_order is not None:
-            ask_orders.append(ask_order)
+            get_orders_bucket(ask_orders_by_price, best_ask_index).append(ask_order)
 
         next_submit_time += time_step
+
+    bid_orders = [order for bucket in bid_orders_by_price.values() for order in bucket]
+    ask_orders = [order for bucket in ask_orders_by_price.values() for order in bucket]
 
     for order in bid_orders:
         if order.result == -1:
@@ -466,3 +890,7 @@ def simulate_virtual_best_orders(
         *finalize_unresolved(bid_orders),
         *finalize_unresolved(ask_orders),
     )
+
+
+if __name__ == "__main__":
+    run_cli()
