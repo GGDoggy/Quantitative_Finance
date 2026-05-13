@@ -151,7 +151,7 @@ def simulate_virtual_best_orders(
             )
 
             if event_type == "trade":
-                if event_time < simulation_start:
+                if event_time <= simulation_start and next_submit_time is not None:
                     continue
 
                 append_trade_evidence(
@@ -270,6 +270,9 @@ def simulate_virtual_best_orders(
                 )
                 if active_ask_order is not None:
                     get_orders_bucket(ask_orders_by_price, best_ask_index).append(active_ask_order)
+
+            if next_submit_time is not None and event_time >= next_submit_time:
+                next_submit_time = None
 
             continue
 
