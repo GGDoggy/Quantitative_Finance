@@ -35,6 +35,11 @@ def build_trade_volume_timeline_view(locators: list["PlotDatasetLocator"]):
     return implementation(locators)
 
 
+def build_fill_probability_view(locators: list["PlotDatasetLocator"]):
+    from gui.plots.fill_probability import build_fill_probability_view as implementation
+    return implementation(locators)
+
+
 def build_orderbook_payload(context: object) -> dict[str, object]:
     from gui.preprocess.orderbook import build_orderbook_payload as implementation
     return implementation(context)
@@ -48,6 +53,10 @@ def build_trades_scatter_payload(context: object) -> dict[str, object]:
 def build_trade_volume_timeline_payload(context: object) -> dict[str, object]:
     from gui.preprocess.trade_volume_timeline import build_trade_volume_timeline_payload as implementation
     return implementation(context)
+
+
+def build_fill_probability_payload(_context: object) -> dict[str, object]:
+    return {}
 
 
 PLOT_REGISTRY: dict[str, PlotSpec] = {
@@ -71,6 +80,13 @@ PLOT_REGISTRY: dict[str, PlotSpec] = {
         plot_builder=build_trade_volume_timeline_view,
         preprocess_builder=build_trade_volume_timeline_payload,
         required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
+    ),
+    "fill_probability": PlotSpec(
+        key="fill_probability",
+        label="Fill Probability",
+        plot_builder=build_fill_probability_view,
+        preprocess_builder=build_fill_probability_payload,
+        required_payload_keys=("__simulation_npz__",),
     ),
 }
 

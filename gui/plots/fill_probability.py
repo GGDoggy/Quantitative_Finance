@@ -7,7 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from gui.data_catalog import PlotDatasetLocator
+from gui.data_catalog import PlotDatasetLocator, find_simulation_files
 
 
 BINS = 20
@@ -25,8 +25,12 @@ SIMULATION_REQUIRED_KEYS = (
 
 
 def _simulation_path(locator: PlotDatasetLocator) -> Path:
-    candidates = sorted(
-        locator.preprocessed_dir.glob(f"{locator.base_id}*simulation*.npz")
+    candidates = find_simulation_files(
+        locator.preprocessed_dir,
+        locator.product_id,
+        locator.timestamp,
+        locator.time_step,
+        locator.time_step_token,
     )
 
     if not candidates:

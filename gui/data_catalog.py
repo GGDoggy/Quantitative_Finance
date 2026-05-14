@@ -13,6 +13,9 @@ import numpy as np
 from gui.registry import PLOT_REGISTRY
 
 
+SIMULATION_VIEW_KEY = "fill_probability"
+
+
 RAW_LEVEL2_INIT_RE = re.compile(r"^level2-(?P<product_id>.+)-init-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 RAW_LEVEL2_UPDATES_RE = re.compile(r"^level2-(?P<product_id>.+)-updates-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 RAW_TRADE_RE = re.compile(r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})\.csv$")
@@ -40,6 +43,49 @@ def format_time_step(time_step: float | str | Decimal) -> str:
     if normalized == normalized.to_integral():
         return format(normalized, "f")
     return format(normalized, "f").rstrip("0").rstrip(".")
+
+
+def _simulation_time_step_tokens(
+    time_step: float,
+    time_step_token: str | None = None,
+) -> tuple[str, ...]:
+    tokens: list[str] = []
+    for token in (time_step_token, format_time_step(time_step), str(time_step)):
+        if token is not None and token not in tokens:
+            tokens.append(token)
+    return tuple(tokens)
+
+
+def find_simulation_files(
+    preprocessed_dir: Path,
+    product_id: str,
+    timestamp: str,
+    time_step: float,
+    time_step_token: str | None = None,
+) -> tuple[Path, ...]:
+    candidates: set[Path] = set()
+    for token in _simulation_time_step_tokens(time_step, time_step_token):
+        base_id = f"{product_id}-{timestamp}-{token}"
+        candidates.update(preprocessed_dir.glob(f"{base_id}-simulation-*.npz"))
+    return tuple(sorted(candidates))
+
+
+def has_simulation_file(
+    preprocessed_dir: Path,
+    product_id: str,
+    timestamp: str,
+    time_step: float,
+    time_step_token: str | None = None,
+) -> bool:
+    return bool(
+        find_simulation_files(
+            preprocessed_dir,
+            product_id,
+            timestamp,
+            time_step,
+            time_step_token,
+        )
+    )
 
 
 def parse_timestamp(timestamp: str) -> datetime:
@@ -134,20 +180,40 @@ def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
     return sorted(entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix)
 
 
-def detect_available_views(path: Path) -> tuple[str, ...]:
+def detect_available_views(
+    path: Path,
+    dataset_hint: PlotDatasetLocator | None = None,
+) -> tuple[str, ...]:
     try:
         with np.load(path, allow_pickle=False) as data:
             if "available_views" in data.files:
-                return tuple(str(view) for view in data["available_views"].tolist())
-            data_keys = set(data.files)
+                available_views = tuple(
+                    str(view) for view in data["available_views"].tolist()
+                )
+            else:
+                data_keys = set(data.files)
+                available_views = tuple(
+                    key
+                    for key, spec in PLOT_REGISTRY.items()
+                    if set(spec.required_payload_keys).issubset(data_keys)
+                )
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
 
-    available_views = tuple(
-        key
-        for key, spec in PLOT_REGISTRY.items()
-        if set(spec.required_payload_keys).issubset(data_keys)
-    )
+    if (
+        dataset_hint is not None
+        and SIMULATION_VIEW_KEY in PLOT_REGISTRY
+        and has_simulation_file(
+            dataset_hint.preprocessed_dir,
+            dataset_hint.product_id,
+            dataset_hint.timestamp,
+            dataset_hint.time_step,
+            dataset_hint.time_step_token,
+        )
+        and SIMULATION_VIEW_KEY not in available_views
+    ):
+        available_views = (*available_views, SIMULATION_VIEW_KEY)
+
     return available_views or ("orderbook",)
 
 
@@ -159,19 +225,32 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         if not match:
             continue
 
+        product_id = match.group("product_id")
+        timestamp = match.group("timestamp")
+        time_step = float(match.group("time_step"))
+        time_step_token = match.group("time_step")
+        locator = PlotDatasetLocator(
+            product_id=product_id,
+            timestamp=timestamp,
+            time_step=time_step,
+            preprocessed_dir=preprocessed_dir,
+            time_step_token=time_step_token,
+            original_path=file_path,
+        )
+
         try:
-            available_views = detect_available_views(file_path)
+            available_views = detect_available_views(file_path, locator)
         except PreprocessedDataError:
             continue
 
         datasets.append(
             PreprocessedDataset(
-                product_id=match.group("product_id"),
-                timestamp=match.group("timestamp"),
-                time_step=float(match.group("time_step")),
+                product_id=product_id,
+                timestamp=timestamp,
+                time_step=time_step,
                 path=file_path,
                 available_views=available_views,
-                time_step_token=match.group("time_step"),
+                time_step_token=time_step_token,
             )
         )
 
