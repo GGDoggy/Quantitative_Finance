@@ -150,9 +150,8 @@ class OrderbookDashboard:
             self.plot_area.objects = [pn.pane.Alert("Please select datasets from the same product for plotting.", alert_type="warning")]
             return
 
-        payload_cache = {}
         locators = [
-            dataset.to_locator(self.preprocessed_dir, payload_cache=payload_cache)
+            dataset.to_locator(self.preprocessed_dir)
             for dataset in selected_datasets
         ]
         plot_panes = []

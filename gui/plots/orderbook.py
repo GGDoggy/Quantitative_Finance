@@ -8,7 +8,41 @@ from holoviews.operation.datashader import dynspread, rasterize, shade
 import numpy as np
 import pandas as pd
 
-from gui.data_catalog import PlotDatasetLocator, load_preprocessed_payload
+from gui.data_catalog import PlotDatasetLocator, PreprocessedDataError
+
+
+ORDERBOOK_REQUIRED_KEYS = ("price_axis", "time_axis", "data", "bid", "ask")
+ORDERBOOK_OPTIONAL_KEYS = ("mid",)
+
+
+def _orderbook_path(locator: PlotDatasetLocator):
+    return locator.preprocessed_dir / f"{locator.base_id}-orderbook_for_plot.npz"
+
+
+def _load_orderbook_payload(locator: PlotDatasetLocator) -> dict[str, object]:
+    path = _orderbook_path(locator)
+    if not path.is_file():
+        raise FileNotFoundError(f"Orderbook dataset file does not exist: {path}")
+
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            missing_keys = [key for key in ORDERBOOK_REQUIRED_KEYS if key not in data.files]
+            if missing_keys:
+                raise KeyError(
+                    f"Orderbook dataset {path.name} is missing required key(s): {', '.join(missing_keys)}"
+                )
+
+            payload = {key: data[key] for key in ORDERBOOK_REQUIRED_KEYS}
+            payload.update({key: data[key] for key in ORDERBOOK_OPTIONAL_KEYS if key in data.files})
+    except KeyError:
+        raise
+    except (OSError, ValueError) as error:
+        raise PreprocessedDataError(f"Failed to load orderbook dataset {path.name}: {error}") from error
+
+    payload["product_id"] = locator.product_id
+    payload["timestamp"] = locator.timestamp
+    payload["time_step"] = locator.time_step
+    return payload
 
 
 PLOT_WIDTH = 1200
@@ -129,6 +163,9 @@ def _normalize_payload(payload: dict[str, object]) -> dict[str, object]:
 
 
 def _merge_payloads(payloads: list[dict[str, object]]) -> dict[str, object]:
+    if not payloads:
+        raise ValueError("No orderbook payloads available.")
+
     normalized = [_normalize_payload(payload) for payload in payloads]
     product_ids = {item["product_id"] for item in normalized}
     if len(product_ids) != 1:
@@ -182,7 +219,7 @@ def _merge_payloads(payloads: list[dict[str, object]]) -> dict[str, object]:
 
 
 def build_orderbook_view(locators: list[PlotDatasetLocator]):
-    payloads = [load_preprocessed_payload(locator) for locator in locators]
+    payloads = [_load_orderbook_payload(locator) for locator in locators]
     merged = _merge_payloads(payloads)
     raw_time_axis = merged["time_axis"]
     raw_price_axis = merged["price_axis"]

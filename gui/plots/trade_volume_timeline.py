@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
-from gui.data_catalog import PlotDatasetLocator, load_preprocessed_payload
+from gui.data_catalog import PlotDatasetLocator
 
 from gui.plots.trades_scatter import SIDE_COLORS, SIDE_LABELS, _extract_trades
 
 
 def build_trade_volume_timeline_view(locators: list[PlotDatasetLocator]):
-    payloads = [load_preprocessed_payload(locator) for locator in locators]
-    trade_frame, product_id = _extract_trades(payloads)
+    trade_frame, product_id = _extract_trades(locators)
 
     figure = go.Figure()
     for side_value, side_label in SIDE_LABELS.items():
