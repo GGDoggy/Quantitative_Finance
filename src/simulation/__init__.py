@@ -1,3 +1,4 @@
+from .best_size_changed import ALGORITHM_NAME as BEST_SIZE_CHANGED_NAME
 from .event_balanced import ALGORITHM_NAME as EVENT_BALANCED_NAME
 from .library import (
     DATA_V3_PATH,
@@ -23,6 +24,7 @@ from .time_averaged_random_cancellation import (
 
 
 __all__ = [
+    "BEST_SIZE_CHANGED_NAME",
     "DATA_V3_PATH",
     "DEFAULT_BASE_TICK",
     "DEFAULT_TIME_STEP",
