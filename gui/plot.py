@@ -10,7 +10,12 @@ import holoviews as hv
 import panel as pn
 from plotly.graph_objects import Figure
 
-from gui.data_catalog import PlotDatasetLocator, discover_preprocessed_datasets, discover_raw_batches
+from gui.data_catalog import (
+    PlotDatasetLocator,
+    PreprocessedDataset,
+    discover_preprocessed_datasets,
+    discover_raw_batches,
+)
 from gui.registry import PLOT_LABELS, PLOT_REGISTRY
 from gui.preprocess_service import preprocess_batches
 
@@ -24,7 +29,7 @@ class OrderbookDashboard:
     def __init__(self, raw_dir: Path, preprocessed_dir: Path) -> None:
         self.raw_dir = raw_dir
         self.preprocessed_dir = preprocessed_dir
-        self.preprocessed_by_label = {}
+        self.preprocessed_by_label: dict[str, PreprocessedDataset] = {}
         self.raw_by_label = {}
         self.status = pn.pane.Alert("Ready.", alert_type="light", sizing_mode="stretch_width")
         self.preprocessed_select = pn.widgets.MultiChoice(
@@ -126,7 +131,7 @@ class OrderbookDashboard:
     def _handle_selection_change(self, _event) -> None:
         self._render_plots()
 
-    def _build_plot_pane(self, plot_type: str, locators: list[PlotDatasetLocator]):
+    def _build_plot_pane(self, plot_type: str, locators: list[PlotDatasetLocator]) -> pn.viewable.Viewable:
         builder = PLOT_REGISTRY[plot_type].plot_builder
         plot = builder(locators)
         if isinstance(plot, Figure):
@@ -134,8 +139,12 @@ class OrderbookDashboard:
         return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
 
     def _render_plots(self) -> None:
-        selected_datasets = [self.preprocessed_by_label[label] for label in self.preprocessed_select.value if label in self.preprocessed_by_label]
-        selected_plot_labels = self.plot_select.value
+        selected_datasets: list[PreprocessedDataset] = [
+            self.preprocessed_by_label[label]
+            for label in self.preprocessed_select.value
+            if label in self.preprocessed_by_label
+        ]
+        selected_plot_labels: list[str] = self.plot_select.value
 
         if not selected_datasets:
             self.plot_area.objects = [pn.pane.Markdown("Select one or more preprocessed datasets to start plotting.")]
@@ -150,7 +159,7 @@ class OrderbookDashboard:
             self.plot_area.objects = [pn.pane.Alert("Please select datasets from the same product for plotting.", alert_type="warning")]
             return
 
-        locators = [
+        locators: list[PlotDatasetLocator] = [
             dataset.to_locator(self.preprocessed_dir)
             for dataset in selected_datasets
         ]
