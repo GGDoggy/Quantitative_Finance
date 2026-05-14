@@ -19,7 +19,7 @@ from .time_averaged_random_cancellation import (
 )
 
 
-ALGORITHM_NAME = "event_balanced_placeholder"
+ALGORITHM_NAME = "event_balanced"
 
 
 def _append_new_best_orders(
