@@ -19,9 +19,14 @@ SIMULATION_VIEW_KEY = "fill_probability"
 RAW_LEVEL2_INIT_RE = re.compile(r"^level2-(?P<product_id>.+)-init-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 RAW_LEVEL2_UPDATES_RE = re.compile(r"^level2-(?P<product_id>.+)-updates-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 RAW_TRADE_RE = re.compile(r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})\.csv$")
+TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
 PREPROCESSED_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
-    r"(?P<time_step>\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)-orderbook_for_plot\.npz$"
+    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})-orderbook_for_plot\.npz$"
+)
+SIMULATION_RE = re.compile(
+    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
+    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT}).*simulation.*\.npz$"
 )
 
 
@@ -63,10 +68,23 @@ def find_simulation_files(
     time_step: float,
     time_step_token: str | None = None,
 ) -> tuple[Path, ...]:
-    candidates: set[Path] = set()
-    for token in _simulation_time_step_tokens(time_step, time_step_token):
-        base_id = f"{product_id}-{timestamp}-{token}"
-        candidates.update(preprocessed_dir.glob(f"{base_id}-simulation-*.npz"))
+    candidates: list[Path] = []
+    time_step_tokens = set(_simulation_time_step_tokens(time_step, time_step_token))
+
+    for file_path in _iter_files(preprocessed_dir, ".npz"):
+        match = SIMULATION_RE.match(file_path.name)
+        if not match:
+            continue
+        if (
+            match.group("product_id") != product_id
+            or match.group("timestamp") != timestamp
+        ):
+            continue
+
+        matched_time_step = match.group("time_step")
+        if matched_time_step in time_step_tokens or float(matched_time_step) == time_step:
+            candidates.append(file_path)
+
     return tuple(sorted(candidates))
 
 
@@ -120,6 +138,7 @@ class PlotDatasetLocator:
     preprocessed_dir: Path
     time_step_token: str | None = None
     original_path: Path | None = None
+    simulation_path: Path | None = None
     payload_cache: MutableMapping[Path, dict[str, object]] | None = field(
         default=None,
         compare=False,
@@ -147,16 +166,27 @@ class PreprocessedDataset:
     path: Path
     available_views: tuple[str, ...]
     time_step_token: str | None = None
+    simulation_path: Path | None = None
 
     @property
     def dataset_id(self) -> str:
+        if self.simulation_path is not None:
+            return f"{self.path}#{self.simulation_path.name}"
         return str(self.path)
 
     @property
     def display_name(self) -> str:
         formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         views = ",".join(self.available_views)
-        return f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s | {views}"
+        simulation_suffix = (
+            f" | {self.simulation_path.stem}"
+            if self.simulation_path is not None
+            else ""
+        )
+        return (
+            f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s"
+            f"{simulation_suffix} | {views}"
+        )
 
     def to_locator(
         self,
@@ -170,6 +200,7 @@ class PreprocessedDataset:
             preprocessed_dir=preprocessed_dir,
             time_step_token=self.time_step_token,
             original_path=self.path,
+            simulation_path=self.simulation_path,
             payload_cache=payload_cache,
         )
 
@@ -217,11 +248,26 @@ def detect_available_views(
     return available_views or ("orderbook",)
 
 
+def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
+    views: set[str] = set()
+    for view_group in view_groups:
+        views.update(view_group)
+
+    ordered_views = [view for view in PLOT_REGISTRY if view in views]
+    ordered_views.extend(sorted(views - set(ordered_views)))
+    return tuple(ordered_views)
+
+
 def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedDataset]:
-    datasets: list[PreprocessedDataset] = []
+    entries: dict[
+        tuple[str, str, float],
+        dict[str, object],
+    ] = {}
 
     for file_path in _iter_files(preprocessed_dir, ".npz"):
-        match = PREPROCESSED_RE.match(file_path.name)
+        preprocessed_match = PREPROCESSED_RE.match(file_path.name)
+        simulation_match = SIMULATION_RE.match(file_path.name)
+        match = preprocessed_match or simulation_match
         if not match:
             continue
 
@@ -229,32 +275,97 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         timestamp = match.group("timestamp")
         time_step = float(match.group("time_step"))
         time_step_token = match.group("time_step")
-        locator = PlotDatasetLocator(
-            product_id=product_id,
-            timestamp=timestamp,
-            time_step=time_step,
-            preprocessed_dir=preprocessed_dir,
-            time_step_token=time_step_token,
-            original_path=file_path,
+        key = (product_id, timestamp, time_step)
+        entry = entries.setdefault(
+            key,
+            {
+                "product_id": product_id,
+                "timestamp": timestamp,
+                "time_step": time_step,
+                "time_step_token": time_step_token,
+                "orderbook_path": None,
+                "simulation_paths": [],
+                "orderbook_views": (),
+            },
         )
 
-        try:
-            available_views = detect_available_views(file_path, locator)
-        except PreprocessedDataError:
-            continue
-
-        datasets.append(
-            PreprocessedDataset(
+        if preprocessed_match:
+            locator = PlotDatasetLocator(
                 product_id=product_id,
                 timestamp=timestamp,
                 time_step=time_step,
-                path=file_path,
-                available_views=available_views,
+                preprocessed_dir=preprocessed_dir,
                 time_step_token=time_step_token,
+                original_path=file_path,
             )
-        )
 
-    datasets.sort(key=lambda dataset: (dataset.product_id, dataset.timestamp, dataset.time_step))
+            try:
+                available_views = detect_available_views(file_path, locator)
+            except PreprocessedDataError:
+                continue
+
+            entry["orderbook_path"] = file_path
+            entry["time_step_token"] = time_step_token
+            entry["orderbook_views"] = _union_available_views(
+                available_views,
+            )
+            continue
+
+        simulation_paths = entry["simulation_paths"]
+        if isinstance(simulation_paths, list):
+            simulation_paths.append(file_path)
+
+    datasets: list[PreprocessedDataset] = []
+    for entry in entries.values():
+        orderbook_path = entry["orderbook_path"]
+        simulation_paths = sorted(
+            path for path in entry["simulation_paths"] if isinstance(path, Path)
+        )
+        orderbook_views = tuple(entry["orderbook_views"])
+        time_step_token = str(entry["time_step_token"])
+
+        if isinstance(orderbook_path, Path) and not simulation_paths:
+            datasets.append(
+                PreprocessedDataset(
+                    product_id=str(entry["product_id"]),
+                    timestamp=str(entry["timestamp"]),
+                    time_step=float(entry["time_step"]),
+                    path=orderbook_path,
+                    available_views=orderbook_views,
+                    time_step_token=time_step_token,
+                )
+            )
+            continue
+
+        for simulation_path in simulation_paths:
+            base_views = orderbook_views if isinstance(orderbook_path, Path) else ()
+            datasets.append(
+                PreprocessedDataset(
+                    product_id=str(entry["product_id"]),
+                    timestamp=str(entry["timestamp"]),
+                    time_step=float(entry["time_step"]),
+                    path=(
+                        orderbook_path
+                        if isinstance(orderbook_path, Path)
+                        else simulation_path
+                    ),
+                    available_views=_union_available_views(
+                        base_views,
+                        (SIMULATION_VIEW_KEY,),
+                    ),
+                    time_step_token=time_step_token,
+                    simulation_path=simulation_path,
+                )
+            )
+
+    datasets.sort(
+        key=lambda dataset: (
+            dataset.product_id,
+            dataset.timestamp,
+            dataset.time_step,
+            dataset.simulation_path.name if dataset.simulation_path is not None else "",
+        )
+    )
     return datasets
 
 
@@ -283,6 +394,7 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
     preprocessed_keys = {
         (dataset.product_id, dataset.timestamp)
         for dataset in discover_preprocessed_datasets(preprocessed_dir)
+        if PREPROCESSED_RE.match(dataset.path.name)
     }
 
     batches: list[RawBatch] = []
