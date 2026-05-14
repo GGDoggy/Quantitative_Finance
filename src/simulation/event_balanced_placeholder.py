@@ -57,6 +57,10 @@ def _append_new_best_orders(
     return bid_order, ask_order
 
 
+def _has_more_events_at_time(events, event_index, event_time):
+    return event_index < len(events) and events[event_index][0] == event_time
+
+
 def _clamp_unresolved_orders(orders):
     for order in orders:
         if order.result == -1:
@@ -233,6 +237,9 @@ def simulate_virtual_best_orders(
             if ask_consumed:
                 pending_trade_evidence["ask"].clear()
 
+            if next_submit_time is not None and event_time <= next_submit_time:
+                continue
+
             if event_time < simulation_start:
                 continue
 
@@ -240,6 +247,9 @@ def simulate_virtual_best_orders(
                 active_bid_order = None
             if active_ask_order is not None and active_ask_order.result != -1:
                 active_ask_order = None
+
+            if _has_more_events_at_time(events, event_index, event_time):
+                continue
 
             if active_bid_order is None or active_ask_order is None:
                 debug_best_state(
