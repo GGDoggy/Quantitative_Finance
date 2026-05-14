@@ -351,6 +351,7 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
     preprocessed_keys = {
         (dataset.product_id, dataset.timestamp)
         for dataset in discover_preprocessed_datasets(preprocessed_dir)
+        if PREPROCESSED_RE.match(dataset.path.name)
     }
 
     batches: list[RawBatch] = []
