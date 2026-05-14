@@ -25,6 +25,9 @@ SIMULATION_REQUIRED_KEYS = (
 
 
 def _simulation_path(locator: PlotDatasetLocator) -> Path:
+    if locator.simulation_path is not None:
+        return locator.simulation_path
+
     candidates = find_simulation_files(
         locator.preprocessed_dir,
         locator.product_id,
