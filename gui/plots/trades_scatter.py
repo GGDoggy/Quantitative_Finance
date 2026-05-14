@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from gui.data_catalog import PlotDatasetLocator, load_preprocessed_payload
+
 
 SIDE_LABELS = {-1.0: "buy taker", 1.0: "sell taker"}
 SIDE_COLORS = {-1.0: "#0FB353", 1.0: "#E23E1E"}
@@ -41,7 +43,8 @@ def _extract_trades(payloads: list[dict[str, object]]) -> tuple[pd.DataFrame, st
     return trade_frame, next(iter(product_ids))
 
 
-def build_trades_scatter_view(payloads: list[dict[str, object]]):
+def build_trades_scatter_view(locators: list[PlotDatasetLocator]):
+    payloads = [load_preprocessed_payload(locator) for locator in locators]
     trade_frame, product_id = _extract_trades(payloads)
 
     figure = go.Figure()

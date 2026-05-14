@@ -67,6 +67,22 @@ class RawBatch:
 
 
 @dataclass(frozen=True)
+class PlotDatasetLocator:
+    product_id: str
+    timestamp: str
+    time_step: float
+    preprocessed_dir: Path
+
+    @property
+    def base_id(self) -> str:
+        return f"{self.product_id}-{self.timestamp}-{format_time_step(self.time_step)}"
+
+    @property
+    def path(self) -> Path:
+        return self.preprocessed_dir / f"{self.base_id}-orderbook_for_plot.npz"
+
+
+@dataclass(frozen=True)
 class PreprocessedDataset:
     product_id: str
     timestamp: str
@@ -83,6 +99,14 @@ class PreprocessedDataset:
         formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         views = ",".join(self.available_views)
         return f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s | {views}"
+
+    def to_locator(self, preprocessed_dir: Path) -> PlotDatasetLocator:
+        return PlotDatasetLocator(
+            product_id=self.product_id,
+            timestamp=self.timestamp,
+            time_step=self.time_step,
+            preprocessed_dir=preprocessed_dir,
+        )
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
@@ -181,7 +205,7 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
     return batches
 
 
-def load_preprocessed_payload(dataset: PreprocessedDataset) -> dict[str, object]:
+def load_preprocessed_payload(dataset: PreprocessedDataset | PlotDatasetLocator) -> dict[str, object]:
     try:
         with np.load(dataset.path, allow_pickle=False) as data:
             payload = {key: data[key] for key in data.files}
@@ -191,5 +215,6 @@ def load_preprocessed_payload(dataset: PreprocessedDataset) -> dict[str, object]
     payload["product_id"] = dataset.product_id
     payload["timestamp"] = dataset.timestamp
     payload["time_step"] = dataset.time_step
-    payload["available_views"] = dataset.available_views
+    if isinstance(dataset, PreprocessedDataset):
+        payload["available_views"] = dataset.available_views
     return payload

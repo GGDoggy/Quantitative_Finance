@@ -8,6 +8,8 @@ from holoviews.operation.datashader import dynspread, rasterize, shade
 import numpy as np
 import pandas as pd
 
+from gui.data_catalog import PlotDatasetLocator, load_preprocessed_payload
+
 
 PLOT_WIDTH = 1200
 PLOT_HEIGHT = 280
@@ -179,7 +181,8 @@ def _merge_payloads(payloads: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
-def build_orderbook_view(payloads: list[dict[str, object]]):
+def build_orderbook_view(locators: list[PlotDatasetLocator]):
+    payloads = [load_preprocessed_payload(locator) for locator in locators]
     merged = _merge_payloads(payloads)
     raw_time_axis = merged["time_axis"]
     raw_price_axis = merged["price_axis"]
