@@ -10,7 +10,7 @@ import holoviews as hv
 import panel as pn
 from plotly.graph_objects import Figure
 
-from gui.data_catalog import PreprocessedDataError, discover_preprocessed_datasets, discover_raw_batches, load_preprocessed_payload
+from gui.data_catalog import PlotDatasetLocator, discover_preprocessed_datasets, discover_raw_batches
 from gui.registry import PLOT_LABELS, PLOT_REGISTRY
 from gui.preprocess_service import preprocess_batches
 
@@ -18,6 +18,8 @@ from gui.preprocess_service import preprocess_batches
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "v3"
 PREPROCESSED_DIR = PROJECT_ROOT / "data" / "preprocessed"
+
+
 class OrderbookDashboard:
     def __init__(self, raw_dir: Path, preprocessed_dir: Path) -> None:
         self.raw_dir = raw_dir
@@ -124,9 +126,9 @@ class OrderbookDashboard:
     def _handle_selection_change(self, _event) -> None:
         self._render_plots()
 
-    def _build_plot_pane(self, plot_type: str, payloads: list[dict[str, object]]):
+    def _build_plot_pane(self, plot_type: str, locators: list[PlotDatasetLocator]):
         builder = PLOT_REGISTRY[plot_type].plot_builder
-        plot = builder(payloads)
+        plot = builder(locators)
         if isinstance(plot, Figure):
             return pn.pane.Plotly(plot, config={"responsive": True}, sizing_mode="stretch_width")
         return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
@@ -148,16 +150,16 @@ class OrderbookDashboard:
             self.plot_area.objects = [pn.pane.Alert("Please select datasets from the same product for plotting.", alert_type="warning")]
             return
 
-        try:
-            payloads = [load_preprocessed_payload(dataset) for dataset in selected_datasets]
-        except PreprocessedDataError as error:
-            self.plot_area.objects = [pn.pane.Alert(str(error), alert_type="danger")]
-            return
+        payload_cache = {}
+        locators = [
+            dataset.to_locator(self.preprocessed_dir, payload_cache=payload_cache)
+            for dataset in selected_datasets
+        ]
         plot_panes = []
 
         for plot_label in selected_plot_labels:
             plot_type = next(key for key, value in PLOT_LABELS.items() if value == plot_label)
-            if any(plot_type not in payload["available_views"] for payload in payloads):
+            if any(plot_type not in dataset.available_views for dataset in selected_datasets):
                 plot_panes.append(
                     pn.pane.Alert(
                         f"{plot_label} is unavailable because one or more selected datasets do not advertise that view.",
@@ -167,7 +169,7 @@ class OrderbookDashboard:
                 continue
 
             try:
-                plot_panes.append(self._build_plot_pane(plot_type, payloads))
+                plot_panes.append(self._build_plot_pane(plot_type, locators))
             except Exception as error:
                 plot_panes.append(
                     pn.pane.Alert(
