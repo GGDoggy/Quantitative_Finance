@@ -16,7 +16,7 @@ from .time_averaged_random_cancellation import (
 )
 
 
-DATA_V3_PATH = Path("data/temp")
+DATA_V3_PATH = Path("data/v3")
 OUTPUT_PATH = Path("data/preprocessed")
 DEFAULT_TIME_STEP = 0.01
 DEFAULT_BASE_TICK = 0.00000001

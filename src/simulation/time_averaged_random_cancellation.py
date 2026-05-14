@@ -1,7 +1,8 @@
 import calendar
-import os
 import csv
+import os
 import time
+from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -31,6 +32,64 @@ class TradeEvidence:
     price: float
     volume: float
     event_time: float
+
+
+@dataclass
+class TradeEvidenceSummary:
+    volume: float
+    last_event_time: float | None
+
+
+@dataclass
+class TradeEvidenceIndex:
+    event_times: list[float]
+    at_level_cumulative_volume: list[float]
+    at_level_last_times: list[float | None]
+    through_level_cumulative_volume: list[float]
+    through_level_last_times: list[float | None]
+
+    def _position_at_or_before(self, event_time):
+        return bisect_right(self.event_times, event_time)
+
+    def at_level_at_or_before(self, event_time):
+        position = self._position_at_or_before(event_time)
+        return self._summary_at_position(
+            self.at_level_cumulative_volume,
+            self.at_level_last_times,
+            position,
+        )
+
+    def at_level_after(self, event_time):
+        position = self._position_at_or_before(event_time)
+        return self._summary_after_position(
+            self.at_level_cumulative_volume,
+            self.at_level_last_times,
+            position,
+        )
+
+    def through_level_after(self, event_time):
+        position = self._position_at_or_before(event_time)
+        return self._summary_after_position(
+            self.through_level_cumulative_volume,
+            self.through_level_last_times,
+            position,
+        )
+
+    @staticmethod
+    def _summary_at_position(cumulative_volume, last_times, position):
+        if position <= 0:
+            return TradeEvidenceSummary(0.0, None)
+        return TradeEvidenceSummary(cumulative_volume[position - 1], last_times[position - 1])
+
+    @staticmethod
+    def _summary_after_position(cumulative_volume, last_times, position):
+        if not cumulative_volume:
+            return TradeEvidenceSummary(0.0, None)
+
+        before_volume = cumulative_volume[position - 1] if position > 0 else 0.0
+        volume = cumulative_volume[-1] - before_volume
+        last_time = last_times[-1] if volume > 0 else None
+        return TradeEvidenceSummary(volume, last_time)
 
 
 def read_csv(path):
@@ -356,23 +415,106 @@ def split_trade_evidence(records, book_side, level_price):
     )
 
 
-def reconcile_same_best_price(active_orders, size_delta, traded_at_level, event_time):
+def build_trade_evidence_index(records, book_side, level_price):
+    event_times = []
+    at_level_cumulative_volume = []
+    at_level_last_times = []
+    through_level_cumulative_volume = []
+    through_level_last_times = []
+
+    at_level_total = 0.0
+    at_level_last_time = None
+    through_level_total = 0.0
+    through_level_last_time = None
+
+    for record in records:
+        event_times.append(record.event_time)
+
+        if trade_hits_level(book_side, record.price, level_price):
+            at_level_total += record.volume
+            at_level_last_time = record.event_time
+        at_level_cumulative_volume.append(at_level_total)
+        at_level_last_times.append(at_level_last_time)
+
+        if trade_reaches_price(book_side, record.price, level_price):
+            through_level_total += record.volume
+            through_level_last_time = record.event_time
+        through_level_cumulative_volume.append(through_level_total)
+        through_level_last_times.append(through_level_last_time)
+
+    return TradeEvidenceIndex(
+        event_times,
+        at_level_cumulative_volume,
+        at_level_last_times,
+        through_level_cumulative_volume,
+        through_level_last_times,
+    )
+
+
+def reduce_ahead_by_trade_volume(order, traded_size):
+    if traded_size <= 0 or order.result != -1:
+        return
+    order.ahead = max(order.ahead - traded_size, 0.0)
+
+
+def reconcile_same_best_price(
+    active_orders,
+    size_delta,
+    pending_trade_records,
+    book_side,
+    level_price,
+    update_event_time,
+):
     if not active_orders:
         return
 
-    if traded_at_level > 0:
-        apply_trade_volume(active_orders, traded_at_level, event_time)
+    evidence_index = build_trade_evidence_index(pending_trade_records, book_side, level_price)
+    total_traded_at_level = evidence_index.at_level_after(float("-inf")).volume
 
-    residual = size_delta + traded_at_level
-    if not np.isclose(residual, 0.0):
-        apply_size_delta(active_orders, residual)
-
-
-def reconcile_price_change(active_orders, has_sweep_evidence, event_time):
     for order in active_orders:
         if order.result != -1:
             continue
-        finalize_order(order, event_time, 1 if has_sweep_evidence else 0)
+
+        pre_submit_trade = evidence_index.at_level_at_or_before(order.submit_time)
+        post_submit_trade = evidence_index.at_level_after(order.submit_time)
+
+        reduce_ahead_by_trade_volume(order, pre_submit_trade.volume)
+
+        if post_submit_trade.volume > 0:
+            apply_trade_volume(
+                [order],
+                post_submit_trade.volume,
+                post_submit_trade.last_event_time
+                if post_submit_trade.last_event_time is not None
+                else update_event_time,
+            )
+
+        residual = size_delta + total_traded_at_level
+        if not np.isclose(residual, 0.0):
+            apply_size_delta([order], residual)
+
+
+def reconcile_price_change(
+    active_orders,
+    pending_trade_records,
+    book_side,
+    level_price,
+    update_event_time,
+):
+    evidence_index = build_trade_evidence_index(pending_trade_records, book_side, level_price)
+
+    for order in active_orders:
+        if order.result != -1:
+            continue
+
+        traded_through_level = evidence_index.through_level_after(order.submit_time)
+        finalize_order(
+            order,
+            traded_through_level.last_event_time
+            if traded_through_level.last_event_time is not None
+            else update_event_time,
+            1 if traded_through_level.volume > 0 else 0,
+        )
 
 
 def reconcile_one_side(
@@ -395,32 +537,34 @@ def reconcile_one_side(
     if best_price_unchanged and best_size_unchanged:
         return False
 
-    (
-        traded_at_level,
-        traded_at_level_time,
-        traded_through_level,
-        traded_through_level_time,
-    ) = split_trade_evidence(pending_trade_records, book_side, previous_best_price)
-
     if best_price_unchanged:
         reconcile_same_best_price(
             orders_at_previous_best,
             current_best_size - previous_best_size,
-            traded_at_level,
-            traded_at_level_time if traded_at_level_time is not None else update_event_time,
+            pending_trade_records,
+            book_side,
+            previous_best_price,
+            update_event_time,
         )
         return True
 
     if is_worse_best_price_change(book_side, previous_best_price, current_best_price):
-        has_sweep_evidence = traded_through_level > 0
         reconcile_price_change(
             orders_at_previous_best,
-            has_sweep_evidence,
-            traded_through_level_time if traded_through_level_time is not None else update_event_time,
+            pending_trade_records,
+            book_side,
+            previous_best_price,
+            update_event_time,
         )
         return True
 
-    reconcile_price_change(orders_at_previous_best, False, update_event_time)
+    reconcile_price_change(
+        orders_at_previous_best,
+        [],
+        book_side,
+        previous_best_price,
+        update_event_time,
+    )
     return True
 
 
