@@ -44,6 +44,9 @@ def preprocess_batch(
     available_views: list[str] = []
 
     for plot_key, spec in PLOT_REGISTRY.items():
+        if spec.preprocess_builder is None:
+            continue
+
         chunk = spec.preprocess_builder(context)
         if not all(required_key in chunk for required_key in spec.required_payload_keys):
             continue

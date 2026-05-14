@@ -16,7 +16,7 @@ class PlotSpec:
     key: str
     label: str
     plot_builder: PlotBuilder
-    preprocess_builder: PreprocessBuilder
+    preprocess_builder: PreprocessBuilder | None
     required_payload_keys: tuple[str, ...]
 
 
@@ -55,10 +55,6 @@ def build_trade_volume_timeline_payload(context: object) -> dict[str, object]:
     return implementation(context)
 
 
-def build_fill_probability_payload(_context: object) -> dict[str, object]:
-    return {}
-
-
 PLOT_REGISTRY: dict[str, PlotSpec] = {
     "orderbook": PlotSpec(
         key="orderbook",
@@ -85,7 +81,7 @@ PLOT_REGISTRY: dict[str, PlotSpec] = {
         key="fill_probability",
         label="Fill Probability",
         plot_builder=build_fill_probability_view,
-        preprocess_builder=build_fill_probability_payload,
+        preprocess_builder=None,
         required_payload_keys=("__simulation_npz__",),
     ),
 }
