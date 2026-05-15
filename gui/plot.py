@@ -82,6 +82,7 @@ body, .bk, .pn-template {
   background: rgba(15, 23, 42, 0.78) !important;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24) !important;
   backdrop-filter: blur(14px);
+  overflow: visible !important;
 }
 
 .qf-card .card-header {
@@ -93,6 +94,12 @@ body, .bk, .pn-template {
 
 .qf-card .card-body {
   padding: 1rem !important;
+  overflow: visible !important;
+}
+
+.qf-plot-controls {
+  position: relative;
+  z-index: 30;
 }
 
 .qf-button-row {
@@ -102,6 +109,8 @@ body, .bk, .pn-template {
 
 .qf-plot-workspace {
   min-height: 620px;
+  position: relative;
+  z-index: 1;
 }
 
 .qf-main-plot-card {
@@ -768,6 +777,7 @@ class OrderbookDashboard:
         plot_controls = self._card(
             self.plot_select,
             title="Plot controls",
+            css_classes=["qf-plot-controls"],
         )
         workspace = self._card(
             self.plot_area,
