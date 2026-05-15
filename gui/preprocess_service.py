@@ -12,7 +12,7 @@ from gui.data_catalog import (
     discover_preprocessed_datasets,
     format_time_step,
 )
-from gui.preprocess.common import build_context
+from src.preprocess.common import build_context
 from gui.registry import PLOT_REGISTRY
 
 

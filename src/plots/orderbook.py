@@ -8,7 +8,8 @@ from holoviews.operation.datashader import dynspread, rasterize, shade
 import numpy as np
 import pandas as pd
 
-from gui.data_catalog import PlotDatasetLocator, PreprocessedDataError
+from .errors import PreprocessedDataError
+from .types import PlotDatasetLocator
 
 
 ORDERBOOK_REQUIRED_KEYS = ("price_axis", "time_axis", "data", "bid", "ask")
