@@ -1,3 +1,4 @@
+"""Register dashboard plot types with their lazy plot and preprocess builders."""
 from __future__ import annotations
 
 from dataclasses import dataclass

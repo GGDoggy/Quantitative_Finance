@@ -1,3 +1,4 @@
+"""Coordinate registered preprocess builders and write dashboard-ready datasets."""
 from __future__ import annotations
 
 from pathlib import Path

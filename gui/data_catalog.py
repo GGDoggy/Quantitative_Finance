@@ -1,3 +1,4 @@
+"""Catalog raw Coinbase CSV batches and preprocessed plot datasets for the dashboard."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
