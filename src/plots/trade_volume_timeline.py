@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
+from src.preprocess.catalog import PlotDatasetLocator
+
 from .trades_scatter import SIDE_COLORS, SIDE_LABELS, _extract_trades
-from .types import PlotDatasetLocator
 
 
 def build_trade_volume_timeline_view(locators: list[PlotDatasetLocator]):

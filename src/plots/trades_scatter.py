@@ -6,8 +6,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from src.preprocess.catalog import PlotDatasetLocator
+
 from .errors import PreprocessedDataError
-from .types import PlotDatasetLocator
 
 
 SIDE_LABELS = {-1.0: "buy taker", 1.0: "sell taker"}

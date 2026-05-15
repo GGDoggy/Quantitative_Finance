@@ -10,16 +10,16 @@ import holoviews as hv
 import panel as pn
 from plotly.graph_objects import Figure
 
-from gui.data_catalog import (
+from src.plots import PLOT_LABELS, PLOT_REGISTRY
+from src.preprocess import (
     PlotDatasetLocator,
     PreprocessedDataset,
     discover_preprocessed_datasets,
     discover_raw_batches,
     format_time_step,
     parse_timestamp,
+    preprocess_batches,
 )
-from gui.registry import PLOT_LABELS, PLOT_REGISTRY
-from gui.preprocess_service import preprocess_batches
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "v3"
