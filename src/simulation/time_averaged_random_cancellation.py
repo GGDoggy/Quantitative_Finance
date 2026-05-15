@@ -19,6 +19,7 @@ class VirtualOrder:
     price: float
     near_size: float
     opp_size: float
+    spread: float
     ahead: float
     behind: float
     vorder_ratio: float
@@ -303,7 +304,13 @@ def trade_hits_level(book_side, trade_price, level_price):
     return same_price(trade_price, level_price)
 
 
-def create_virtual_order(best_size, opp_size, submit_time, submit_price, base_tick):
+def compute_bid_ask_spread(best_bid_price, best_ask_price):
+    if not (np.isfinite(best_bid_price) and np.isfinite(best_ask_price)):
+        return np.nan
+    return float(best_ask_price - best_bid_price)
+
+
+def create_virtual_order(best_size, opp_size, spread, submit_time, submit_price, base_tick):
     if np.isnan(submit_price) or best_size <= 0:
         return None
     return VirtualOrder(
@@ -311,6 +318,7 @@ def create_virtual_order(best_size, opp_size, submit_time, submit_price, base_ti
         price=float(submit_price),
         near_size=float(best_size),
         opp_size=float(opp_size),
+        spread=float(spread),
         ahead=float(best_size),
         behind=0.0,
         vorder_ratio=float(base_tick / best_size),
@@ -577,7 +585,8 @@ def finalize_unresolved(orders):
     behind = np.array([max(order.behind, 0.0) for order in orders], dtype=float)
     vorder_ratio = np.array([order.vorder_ratio for order in orders], dtype=float)
     result = np.array([order.result for order in orders], dtype=int)
-    return price, near_size, opp_size, survival_time, ahead, behind, vorder_ratio, result
+    spread = np.array([order.spread for order in orders], dtype=float)
+    return price, near_size, opp_size, survival_time, ahead, behind, vorder_ratio, result, spread
 
 
 def empty_outputs():
@@ -599,7 +608,9 @@ def empty_outputs():
         empty_sim.copy(),
         empty_sim.copy(),
         empty_sim.copy(),
+        empty_sim.copy(),
         empty_result.copy(),
+        empty_sim.copy(),
     )
 
 
@@ -780,6 +791,7 @@ def simulate_virtual_best_orders(
         bid_order = create_virtual_order(
             best_bid_size,
             best_ask_size,
+            compute_bid_ask_spread(best_bid_price, best_ask_price),
             next_submit_time,
             best_bid_price,
             base_tick,
@@ -790,6 +802,7 @@ def simulate_virtual_best_orders(
         ask_order = create_virtual_order(
             best_ask_size,
             best_bid_size,
+            compute_bid_ask_spread(best_bid_price, best_ask_price),
             next_submit_time,
             best_ask_price,
             base_tick,

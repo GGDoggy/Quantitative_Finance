@@ -34,6 +34,7 @@ SIMULATION_RESULT_KEYS = (
     "bid_behind",
     "bid_vorder_ratio",
     "bid_result",
+    "bid_spread",
     "ask_prices",
     "ask_near_size",
     "ask_opp_size",
@@ -42,6 +43,7 @@ SIMULATION_RESULT_KEYS = (
     "ask_behind",
     "ask_vorder_ratio",
     "ask_result",
+    "ask_spread",
 )
 
 ALGORITHMS = {

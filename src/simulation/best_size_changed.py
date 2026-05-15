@@ -10,6 +10,7 @@ from .time_averaged_random_cancellation import (
     advance_best_bid_index,
     append_trade_evidence,
     build_event_stream,
+    compute_bid_ask_spread,
     create_virtual_order,
     debug_best_state,
     empty_outputs,
@@ -51,11 +52,13 @@ def _append_bid_order(
     best_ask_size,
     event_time,
     best_bid_price,
+    best_ask_price,
     base_tick,
 ):
     bid_order = create_virtual_order(
         best_bid_size,
         best_ask_size,
+        compute_bid_ask_spread(best_bid_price, best_ask_price),
         event_time,
         best_bid_price,
         base_tick,
@@ -72,11 +75,13 @@ def _append_ask_order(
     best_bid_size,
     event_time,
     best_ask_price,
+    best_bid_price,
     base_tick,
 ):
     ask_order = create_virtual_order(
         best_ask_size,
         best_bid_size,
+        compute_bid_ask_spread(best_bid_price, best_ask_price),
         event_time,
         best_ask_price,
         base_tick,
@@ -306,6 +311,7 @@ def simulate_virtual_best_orders(
                     current_ask_size,
                     event_time,
                     current_bid_price,
+                    current_ask_price,
                     base_tick,
                 )
                 if bid_order is not None:
@@ -337,6 +343,7 @@ def simulate_virtual_best_orders(
                     current_bid_size,
                     event_time,
                     current_ask_price,
+                    current_bid_price,
                     base_tick,
                 )
                 if ask_order is not None:
