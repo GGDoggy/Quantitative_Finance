@@ -196,6 +196,11 @@ PLOTLY_DARK_LAYOUT = {
     "margin": {"l": 56, "r": 32, "t": 54, "b": 48},
 }
 
+PRODUCT_PLACEHOLDER = "Select a product..."
+PLOT_PLACEHOLDER = "Select a plot..."
+TIMESTAMP_PLACEHOLDER = "Select a timestamp..."
+FILL_GROUP_PLACEHOLDER = "Select a simulation group..."
+
 
 class OrderbookDashboard:
     def __init__(self, raw_dir: Path, preprocessed_dir: Path) -> None:
@@ -302,16 +307,16 @@ class OrderbookDashboard:
 
         previous_product = self._selected_product()
         product_options = self._available_products()
-        next_product = (
-            previous_product
-            if previous_product in product_options
-            else product_options[0] if product_options else None
+        next_product = previous_product if previous_product in product_options else None
+        product_select_options = self._with_placeholder_options(
+            {product_id: product_id for product_id in product_options},
+            PRODUCT_PLACEHOLDER,
         )
 
         self._updating_controls = True
         try:
-            if self.product_select.options != product_options:
-                self.product_select.options = product_options
+            if self.product_select.options != product_select_options:
+                self.product_select.options = product_select_options
             if self.product_select.value != next_product:
                 self.product_select.value = next_product
             self._sync_plot_options(render=False)
@@ -413,7 +418,9 @@ class OrderbookDashboard:
             self._set_preprocess_loading(False)
 
     def _select_preprocessed_dataset(self, dataset: PreprocessedDataset) -> None:
-        if dataset.product_id not in self.product_select.options:
+        if dataset.product_id not in self._selectable_option_values(
+            self.product_select.options
+        ):
             return
 
         preferred_plot_type = next(
@@ -461,6 +468,17 @@ class OrderbookDashboard:
                     self.timestamp_select.value = dataset_key
             finally:
                 self._updating_controls = False
+        elif preferred_plot_type == "fill_probability":
+            group_value = self._fill_probability_group_value(
+                self._fill_probability_group_key(dataset)
+            )
+            if group_value in set(self.fill_group_select.options.values()):
+                self._updating_controls = True
+                try:
+                    if self.fill_group_select.value != group_value:
+                        self.fill_group_select.value = group_value
+                finally:
+                    self._updating_controls = False
 
         self._render_plots()
 
@@ -491,21 +509,23 @@ class OrderbookDashboard:
         product_id = self._selected_product()
         previous_plot_type = self._selected_plot_type()
         plot_options = self._available_plot_labels(product_id) if product_id else []
+        plot_select_options = self._with_placeholder_options(
+            {plot_label: plot_label for plot_label in plot_options},
+            PLOT_PLACEHOLDER,
+        )
         previous_plot_label = (
             self._plot_label_for_type(previous_plot_type)
             if previous_plot_type is not None
             else None
         )
         next_plot_label = (
-            previous_plot_label
-            if previous_plot_label in plot_options
-            else plot_options[0] if plot_options else None
+            previous_plot_label if previous_plot_label in plot_options else None
         )
 
         self._updating_controls = True
         try:
-            if self.plot_select.options != plot_options:
-                self.plot_select.options = plot_options
+            if self.plot_select.options != plot_select_options:
+                self.plot_select.options = plot_select_options
             if self.plot_select.value != next_plot_label:
                 self.plot_select.value = next_plot_label
             self._sync_timestamp_options(render=False)
@@ -524,12 +544,13 @@ class OrderbookDashboard:
             if product_id and plot_type and not is_fill_probability
             else {}
         )
+        timestamp_select_options = self._with_placeholder_options(
+            timestamp_options, TIMESTAMP_PLACEHOLDER
+        )
         previous_timestamp = self.timestamp_select.value
-        timestamp_values = set(timestamp_options.values())
+        timestamp_values = self._selectable_option_values(timestamp_select_options)
         next_timestamp = (
-            previous_timestamp
-            if previous_timestamp in timestamp_values
-            else next(iter(timestamp_options.values()), None)
+            previous_timestamp if previous_timestamp in timestamp_values else None
         )
 
         self._updating_controls = True
@@ -538,8 +559,8 @@ class OrderbookDashboard:
                 self.timestamp_select.visible = not is_fill_probability
             if self.timestamp_select.disabled != is_fill_probability:
                 self.timestamp_select.disabled = is_fill_probability
-            if self.timestamp_select.options != timestamp_options:
-                self.timestamp_select.options = timestamp_options
+            if self.timestamp_select.options != timestamp_select_options:
+                self.timestamp_select.options = timestamp_select_options
             if self.timestamp_select.value != next_timestamp:
                 self.timestamp_select.value = next_timestamp
             self._sync_fill_group_options(render=False)
@@ -558,13 +579,12 @@ class OrderbookDashboard:
             if product_id and is_fill_probability
             else {}
         )
-        previous_group = self.fill_group_select.value
-        group_values = set(group_options.values())
-        next_group = (
-            previous_group
-            if previous_group in group_values
-            else next(iter(group_options.values()), None)
+        fill_group_select_options = self._with_placeholder_options(
+            group_options, FILL_GROUP_PLACEHOLDER
         )
+        previous_group = self.fill_group_select.value
+        group_values = self._selectable_option_values(fill_group_select_options)
+        next_group = previous_group if previous_group in group_values else None
 
         self._updating_controls = True
         try:
@@ -573,8 +593,8 @@ class OrderbookDashboard:
             next_disabled = not is_fill_probability
             if self.fill_group_select.disabled != next_disabled:
                 self.fill_group_select.disabled = next_disabled
-            if self.fill_group_select.options != group_options:
-                self.fill_group_select.options = group_options
+            if self.fill_group_select.options != fill_group_select_options:
+                self.fill_group_select.options = fill_group_select_options
             if self.fill_group_select.value != next_group:
                 self.fill_group_select.value = next_group
         finally:
@@ -613,6 +633,16 @@ class OrderbookDashboard:
     def _selected_product(self) -> str | None:
         value = self.product_select.value
         return str(value) if value else None
+
+    def _with_placeholder_options(
+        self, options: dict[str, str], placeholder: str
+    ) -> dict[str, str | None]:
+        return {placeholder: None, **options}
+
+    def _selectable_option_values(self, options) -> set[str]:
+        if isinstance(options, dict):
+            return {value for value in options.values() if value is not None}
+        return {value for value in options if value is not None}
 
     def _selected_plot_type(self) -> str | None:
         value = self.plot_select.value
@@ -1024,6 +1054,8 @@ class OrderbookDashboard:
 
         product_id = self._selected_product()
         if product_id is None:
+            if self._selectable_option_values(self.product_select.options):
+                return self._empty_state("Select a product to start plotting.", "info")
             return self._empty_state(
                 "No product has plottable preprocessed data. Refresh the catalog "
                 "after adding datasets with available views.",
@@ -1032,25 +1064,41 @@ class OrderbookDashboard:
 
         plot_type = self._selected_plot_type()
         if plot_type is None:
+            if self._selectable_option_values(self.plot_select.options):
+                return self._empty_state(
+                    f"Select a plot for `{product_id}` to start rendering.",
+                    "info",
+                )
             return self._empty_state(
                 f"Selected product `{product_id}` does not have any available plots.",
                 "warning",
             )
 
         if plot_type == "fill_probability":
-            if not self._selected_datasets_for_plot():
+            if not self._selectable_option_values(self.fill_group_select.options):
                 return self._empty_state(
                     "Fill Probability cannot be rendered because no mergeable "
                     f"simulation datasets were found for `{product_id}`.",
                     "warning",
                 )
+            if not self.fill_group_select.value:
+                return self._empty_state(
+                    f"Select a simulation group for `{product_id}` before rendering.",
+                    "info",
+                )
             return None
 
         if not self.timestamp_select.value:
+            if not self._selectable_option_values(self.timestamp_select.options):
+                return self._empty_state(
+                    f"Selected plot `{self._plot_label_for_type(plot_type)}` does not "
+                    f"have any plottable timestamps for `{product_id}`.",
+                    "warning",
+                )
             return self._empty_state(
-                f"Selected plot `{self._plot_label_for_type(plot_type)}` does not "
-                f"have any plottable timestamps for `{product_id}`.",
-                "warning",
+                f"Select a timestamp for `{self._plot_label_for_type(plot_type)}` "
+                f"under `{product_id}` before rendering.",
+                "info",
             )
 
         if not self._selected_datasets_for_plot():
@@ -1082,37 +1130,12 @@ class OrderbookDashboard:
         ]
         selected_dataset_count = len(selected_datasets)
 
-        for plot_label in selected_plot_labels:
-            plot_type = self._plot_type_for_label(plot_label)
-            if any(
-                plot_type not in dataset.available_views
-                for dataset in selected_datasets
-            ):
-                plot_cards.append(
-                    self._unsupported_plot_card(
-                        plot_label, plot_type, selected_datasets
-                    )
-                )
-                continue
-
-            try:
-                result_pane = self._build_plot_pane(plot_type, locators)
-                plot_cards.append(
-                    self._plot_card(
-                        plot_type,
-                        plot_label, selected_dataset_count, result_pane
-                    )
-                )
-            except Exception as error:
-                plot_cards.append(
-                    self._render_error_card(
-                        plot_label, selected_dataset_count, error
-                    )
-                )
-
-        if not plot_cards:
+        try:
+            result_pane = self._build_plot_pane(plot_type, locators)
             self.plot_area.objects = [
-                self._plot_card(plot_label, selected_dataset_count, result_pane)
+                self._plot_card(
+                    plot_type, plot_label, selected_dataset_count, result_pane
+                )
             ]
         except Exception as error:
             self.plot_area.objects = [
