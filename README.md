@@ -4,7 +4,13 @@ Run `websocket.py` with `/server` being root to collect data. It works 24/7 (I w
 
 You can change websocket setting in `config.json`.
 
-`plot.py` plots all data in `/data` and saves them into `/fig`.
+The dashboard is launched from the project root with:
+
+```bash
+python -m gui.plot
+```
+
+`gui.plot` starts a local Panel dashboard for cataloging Coinbase market data, preprocessing raw `data/v3` batches into `data/preprocessed`, and switching between registered interactive plot views. The app now lists available preprocessed datasets and raw batches, supports catalog refresh and selected-batch preprocessing from the UI, warns when selected datasets span multiple products, and reports render errors inside the affected plot card or tab. It no longer behaves as a script that simply plots everything in `/data` and writes static figures to `/fig`.
 
 The timestamps of the files in `/data` are in UTC, as well as those generated in `/server`.
 

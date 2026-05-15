@@ -1,3 +1,4 @@
+"""Coordinate registered preprocess builders and write dashboard-ready datasets."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,7 +13,7 @@ from gui.data_catalog import (
     discover_preprocessed_datasets,
     format_time_step,
 )
-from gui.preprocess.common import build_context
+from src.preprocess.common import build_context
 from gui.registry import PLOT_REGISTRY
 
 
@@ -44,6 +45,9 @@ def preprocess_batch(
     available_views: list[str] = []
 
     for plot_key, spec in PLOT_REGISTRY.items():
+        if spec.preprocess_builder is None:
+            continue
+
         chunk = spec.preprocess_builder(context)
         if not all(required_key in chunk for required_key in spec.required_payload_keys):
             continue

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
-from gui.plots.trades_scatter import SIDE_COLORS, SIDE_LABELS, _extract_trades
+from .trades_scatter import SIDE_COLORS, SIDE_LABELS, _extract_trades
+from .types import PlotDatasetLocator
 
 
-def build_trade_volume_timeline_view(payloads: list[dict[str, object]]):
-    trade_frame, product_id = _extract_trades(payloads)
+def build_trade_volume_timeline_view(locators: list[PlotDatasetLocator]):
+    trade_frame, product_id = _extract_trades(locators)
 
     figure = go.Figure()
     for side_value, side_label in SIDE_LABELS.items():

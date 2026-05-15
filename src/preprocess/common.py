@@ -6,17 +6,21 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from gui.data_catalog import RawBatch
+
+class RawBatchLike(Protocol):
+    init_path: Path
+    updates_path: Path
+    trade_path: Path
+    timestamp: str
 
 
 @dataclass(frozen=True)
 class PreprocessContext:
-    batch: "RawBatch"
+    batch: RawBatchLike
     time_step: float
     init_rows: list[list[float]]
     updates_rows: list[list[float]]
@@ -29,7 +33,7 @@ def read_csv_rows(path: Path) -> list[list[float]]:
         return [list(row) for row in reader]
 
 
-def build_context(batch: RawBatch, time_step: float) -> PreprocessContext:
+def build_context(batch: RawBatchLike, time_step: float) -> PreprocessContext:
     return PreprocessContext(
         batch=batch,
         time_step=time_step,
