@@ -101,7 +101,20 @@ body, .bk, .pn-template {
 }
 
 .qf-plot-workspace {
-  min-height: 540px;
+  min-height: 620px;
+}
+
+.qf-main-plot-card {
+  min-height: 620px;
+}
+
+.qf-plot-result {
+  min-height: 560px;
+  width: 100%;
+}
+
+.qf-plot-tabs {
+  width: 100%;
 }
 
 .qf-status-card .alert-success {
@@ -140,7 +153,11 @@ body, .bk, .pn-template {
     align-items: stretch !important;
   }
 
-  .qf-plot-workspace {
+  .qf-plot-workspace, .qf-main-plot-card {
+    min-height: 460px;
+  }
+
+  .qf-plot-result {
     min-height: 420px;
   }
 }
@@ -216,6 +233,7 @@ class OrderbookDashboard:
                 "Select one or more preprocessed datasets to start plotting."
             ),
             sizing_mode="stretch_both",
+            min_width=720,
         )
 
         self.refresh_button.on_click(self._handle_refresh)
@@ -362,9 +380,14 @@ class OrderbookDashboard:
             themed_plot = Figure(plot)
             themed_plot.update_layout(**PLOTLY_DARK_LAYOUT)
             return pn.pane.Plotly(
-                themed_plot, config={"responsive": True}, sizing_mode="stretch_width"
+                themed_plot,
+                config={"responsive": True},
+                sizing_mode="stretch_both",
+                min_height=560,
             )
-        return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
+        return pn.pane.HoloViews(
+            plot, sizing_mode="stretch_both", min_height=560
+        )
 
     def _selected_datasets(self) -> list[PreprocessedDataset]:
         return [
@@ -452,37 +475,99 @@ class OrderbookDashboard:
     def _empty_state(self, message: str, level: str = "info") -> pn.pane.Alert:
         return pn.pane.Alert(message, alert_type=level, sizing_mode="stretch_width")
 
-    def _unsupported_plot_state(
+    def _render_error_alert(
+        self, plot_label: str, error: Exception | None = None
+    ) -> pn.pane.Alert:
+        if error is None:
+            return pn.pane.Alert(
+                f"No render errors for {plot_label}.",
+                alert_type="danger",
+                sizing_mode="stretch_width",
+                visible=False,
+            )
+
+        return pn.pane.Alert(
+            f"Failed to render {plot_label}.\n\n"
+            f"**Technical details**\n\n```text\n{error}\n```",
+            alert_type="danger",
+            sizing_mode="stretch_width",
+        )
+
+    def _plot_card(
+        self,
+        plot_label: str,
+        selected_dataset_count: int,
+        result_pane: pn.viewable.Viewable,
+        *,
+        error: Exception | None = None,
+        notice: pn.viewable.Viewable | None = None,
+        css_classes: list[str] | None = None,
+    ) -> pn.Card:
+        metadata = pn.pane.Markdown(
+            f"**Plot:** {plot_label}  \n"
+            f"**Selected dataset count:** {selected_dataset_count}",
+            sizing_mode="stretch_width",
+            margin=(0, 0, 10, 0),
+        )
+        result_container = pn.Column(
+            result_pane,
+            sizing_mode="stretch_both",
+            css_classes=["qf-plot-result"],
+            margin=(0, 0, 12, 0),
+        )
+        objects = [metadata]
+        if notice is not None:
+            objects.append(notice)
+        objects.extend([result_container, self._render_error_alert(plot_label, error)])
+        return self._card(
+            *objects,
+            title=plot_label,
+            sizing_mode="stretch_both",
+            css_classes=["qf-main-plot-card", *(css_classes or [])],
+            margin=(0, 0, 0, 0),
+        )
+
+    def _unsupported_plot_card(
         self,
         plot_label: str,
         plot_type: str,
         selected_datasets: list[PreprocessedDataset],
-    ) -> pn.pane.Alert:
+    ) -> pn.Card:
         unsupported = [
             dataset.display_name
             for dataset in selected_datasets
             if plot_type not in dataset.available_views
         ]
         dataset_lines = "\n".join(f"- `{dataset}`" for dataset in unsupported)
-        return self._empty_state(
+        notice = pn.pane.Alert(
             f"{plot_label} is unavailable for {len(unsupported)} selected "
-            f"dataset(s). Deselect unsupported datasets or choose another plot.\n\n"
-            f"**Unsupported datasets**\n{dataset_lines}",
-            "warning",
+            "dataset(s). Deselect unsupported datasets or choose another plot.",
+            alert_type="warning",
+            sizing_mode="stretch_width",
+        )
+        details = pn.pane.Markdown(
+            "No render result is available for this plot with the current "
+            f"dataset selection.\n\n**Unsupported datasets**\n{dataset_lines}",
+            sizing_mode="stretch_width",
+        )
+        return self._plot_card(
+            plot_label,
+            len(selected_datasets),
+            details,
+            notice=notice,
+            css_classes=["qf-warning-card"],
         )
 
-    def _render_error_state(self, plot_label: str, error: Exception) -> pn.Column:
-        return pn.Column(
-            pn.pane.Alert(
-                f"Failed to render {plot_label}",
-                alert_type="danger",
-                sizing_mode="stretch_width",
-            ),
-            pn.pane.Markdown(
-                f"**Technical details**\n\n```text\n{error}\n```",
-                sizing_mode="stretch_width",
-            ),
+    def _render_error_card(
+        self, plot_label: str, selected_dataset_count: int, error: Exception
+    ) -> pn.Card:
+        result_placeholder = pn.pane.Markdown(
+            "Render output is unavailable because the plot builder raised an "
+            "exception. See the render error alert below for details.",
             sizing_mode="stretch_width",
+        )
+        return self._plot_card(
+            plot_label, selected_dataset_count, result_placeholder, error=error
         )
 
     def _plot_selection_empty_state(
@@ -535,7 +620,8 @@ class OrderbookDashboard:
         locators: list[PlotDatasetLocator] = [
             dataset.to_locator(self.preprocessed_dir) for dataset in selected_datasets
         ]
-        plot_panes = []
+        plot_cards: list[pn.Card] = []
+        selected_dataset_count = len(selected_datasets)
 
         for plot_label in selected_plot_labels:
             plot_type = self._plot_type_for_label(plot_label)
@@ -543,20 +629,44 @@ class OrderbookDashboard:
                 plot_type not in dataset.available_views
                 for dataset in selected_datasets
             ):
-                plot_panes.append(
-                    self._unsupported_plot_state(
+                plot_cards.append(
+                    self._unsupported_plot_card(
                         plot_label, plot_type, selected_datasets
                     )
                 )
                 continue
 
             try:
-                plot_panes.append(self._build_plot_pane(plot_type, locators))
+                result_pane = self._build_plot_pane(plot_type, locators)
+                plot_cards.append(
+                    self._plot_card(
+                        plot_label, selected_dataset_count, result_pane
+                    )
+                )
             except Exception as error:
-                plot_panes.append(self._render_error_state(plot_label, error))
+                plot_cards.append(
+                    self._render_error_card(
+                        plot_label, selected_dataset_count, error
+                    )
+                )
 
-        self.plot_area.objects = plot_panes or [
-            self._empty_state("No plots are available for the current selection.")
+        if not plot_cards:
+            self.plot_area.objects = [
+                self._empty_state("No plots are available for the current selection.")
+            ]
+            return
+
+        if len(plot_cards) == 1:
+            self.plot_area.objects = plot_cards
+            return
+
+        self.plot_area.objects = [
+            pn.Tabs(
+                *[(card.title, card) for card in plot_cards],
+                sizing_mode="stretch_both",
+                dynamic=True,
+                css_classes=["qf-plot-tabs"],
+            )
         ]
 
     def _card(
@@ -674,7 +784,7 @@ class OrderbookDashboard:
             plot_controls,
             workspace,
             sizing_mode="stretch_both",
-            min_width=320,
+            min_width=760,
         )
 
     def build_status_section(self) -> pn.Card:
