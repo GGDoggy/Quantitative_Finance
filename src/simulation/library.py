@@ -4,9 +4,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .event_balanced_placeholder import (
-    ALGORITHM_NAME as EVENT_BALANCED_PLACEHOLDER_NAME,
-    simulate_virtual_best_orders as simulate_event_balanced_placeholder,
+from .best_size_changed import (
+    ALGORITHM_NAME as BEST_SIZE_CHANGED_NAME,
+    simulate_virtual_best_orders as simulate_best_size_changed,
+)
+from .event_balanced import (
+    ALGORITHM_NAME as EVENT_BALANCED_NAME,
+    simulate_virtual_best_orders as simulate_event_balanced,
 )
 from .time_averaged_random_cancellation import (
     ALGORITHM_NAME as TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
@@ -42,7 +46,8 @@ SIMULATION_RESULT_KEYS = (
 
 ALGORITHMS = {
     TIME_AVERAGED_RANDOM_CANCELLATION_NAME: simulate_time_averaged_random_cancellation,
-    EVENT_BALANCED_PLACEHOLDER_NAME: simulate_event_balanced_placeholder,
+    EVENT_BALANCED_NAME: simulate_event_balanced,
+    BEST_SIZE_CHANGED_NAME: simulate_best_size_changed,
 }
 
 
