@@ -15,6 +15,8 @@ from gui.data_catalog import (
     PreprocessedDataset,
     discover_preprocessed_datasets,
     discover_raw_batches,
+    format_time_step,
+    parse_timestamp,
 )
 from gui.registry import PLOT_LABELS, PLOT_REGISTRY
 from gui.preprocess_service import preprocess_batches
@@ -191,7 +193,11 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
         )
         self.dataset_summary = pn.pane.Markdown(
-            "No dataset selected.",
+            "No preprocessed datasets discovered.",
+            sizing_mode="stretch_width",
+        )
+        self.raw_summary = pn.pane.Markdown(
+            "No raw batches discovered.",
             sizing_mode="stretch_width",
         )
         self.preprocess_progress = pn.pane.Markdown(
@@ -208,6 +214,7 @@ class OrderbookDashboard:
         self.refresh_button.on_click(self._handle_refresh)
         self.preprocess_button.on_click(self._handle_preprocess)
         self.preprocessed_select.param.watch(self._handle_selection_change, "value")
+        self.raw_select.param.watch(self._handle_raw_selection_change, "value")
         self.plot_select.param.watch(self._handle_selection_change, "value")
 
         self.refresh_catalog()
@@ -240,6 +247,7 @@ class OrderbookDashboard:
         if not self.preprocessed_select.value and datasets:
             self.preprocessed_select.value = [datasets[0].display_name]
 
+        self._update_raw_summary()
         self._render_plots()
 
     def _set_status(self, message: str, level: str = "light") -> None:
@@ -308,6 +316,9 @@ class OrderbookDashboard:
     def _handle_selection_change(self, _event) -> None:
         self._render_plots()
 
+    def _handle_raw_selection_change(self, _event) -> None:
+        self._update_raw_summary()
+
     def _build_plot_pane(
         self, plot_type: str, locators: list[PlotDatasetLocator]
     ) -> pn.viewable.Viewable:
@@ -336,11 +347,27 @@ class OrderbookDashboard:
     def _update_dataset_summary(
         self, selected_datasets: list[PreprocessedDataset]
     ) -> None:
+        if not self.preprocessed_by_label:
+            self.dataset_summary.object = (
+                "**Selected dataset count:** 0\n\n"
+                "No preprocessed datasets were found. Run preprocessing on a raw "
+                "batch or refresh the catalog after adding `.npz` files."
+            )
+            return
+
         if not selected_datasets:
-            self.dataset_summary.object = "No preprocessed dataset selected."
+            self.dataset_summary.object = (
+                "**Selected dataset count:** 0\n\n"
+                "Choose one or more preprocessed datasets to see product, time, "
+                "step, and view details."
+            )
             return
 
         product_ids = sorted({dataset.product_id for dataset in selected_datasets})
+        timestamps = sorted(dataset.timestamp for dataset in selected_datasets)
+        time_steps = sorted(
+            {format_time_step(dataset.time_step) for dataset in selected_datasets}
+        )
         available_views = sorted(
             {
                 PLOT_LABELS.get(view, view)
@@ -348,43 +375,127 @@ class OrderbookDashboard:
                 for view in dataset.available_views
             }
         )
+        timestamp_range = self._format_timestamp_range(timestamps)
         dataset_lines = "\n".join(
             f"- `{dataset.display_name}`" for dataset in selected_datasets
         )
         self.dataset_summary.object = (
             f"**Selected dataset count:** {len(selected_datasets)}\n\n"
-            f"**Product ids:** {', '.join(product_ids)}\n\n"
-            f"**Available advertised views:** {', '.join(available_views) or 'None'}\n\n"
+            f"**Product id:** {', '.join(product_ids)}\n\n"
+            f"**Timestamp range:** {timestamp_range}\n\n"
+            f"**Time step:** {', '.join(f'{step}s' for step in time_steps)}\n\n"
+            f"**Available views:** {', '.join(available_views) or 'None'}\n\n"
             f"**Datasets**\n{dataset_lines}"
         )
+
+    def _update_raw_summary(self) -> None:
+        pending_count = len(self.raw_by_label)
+        selected_count = len(
+            [label for label in self.raw_select.value if label in self.raw_by_label]
+        )
+        if pending_count == 0:
+            self.raw_summary.object = (
+                "**Pending raw batch count:** 0\n\n"
+                "**Selected raw batch count:** 0\n\n"
+                "No raw batches are ready for preprocessing."
+            )
+            return
+
+        self.raw_summary.object = (
+            f"**Pending raw batch count:** {pending_count}\n\n"
+            f"**Selected raw batch count:** {selected_count}"
+        )
+
+    def _format_timestamp_range(self, timestamps: list[str]) -> str:
+        if not timestamps:
+            return "None"
+        first = parse_timestamp(timestamps[0]).strftime("%Y-%m-%d %H:%M:%S")
+        last = parse_timestamp(timestamps[-1]).strftime("%Y-%m-%d %H:%M:%S")
+        if first == last:
+            return first
+        return f"{first} → {last}"
+
+    def _empty_state(self, message: str, level: str = "info") -> pn.pane.Alert:
+        return pn.pane.Alert(message, alert_type=level, sizing_mode="stretch_width")
+
+    def _unsupported_plot_state(
+        self,
+        plot_label: str,
+        plot_type: str,
+        selected_datasets: list[PreprocessedDataset],
+    ) -> pn.pane.Alert:
+        unsupported = [
+            dataset.display_name
+            for dataset in selected_datasets
+            if plot_type not in dataset.available_views
+        ]
+        dataset_lines = "\n".join(f"- `{dataset}`" for dataset in unsupported)
+        return self._empty_state(
+            f"{plot_label} is unavailable for {len(unsupported)} selected "
+            f"dataset(s). Deselect unsupported datasets or choose another plot.\n\n"
+            f"**Unsupported datasets**\n{dataset_lines}",
+            "warning",
+        )
+
+    def _render_error_state(self, plot_label: str, error: Exception) -> pn.Column:
+        return pn.Column(
+            pn.pane.Alert(
+                f"Failed to render {plot_label}",
+                alert_type="danger",
+                sizing_mode="stretch_width",
+            ),
+            pn.pane.Markdown(
+                f"**Technical details**\n\n```text\n{error}\n```",
+                sizing_mode="stretch_width",
+            ),
+            sizing_mode="stretch_width",
+        )
+
+    def _plot_selection_empty_state(
+        self,
+        selected_datasets: list[PreprocessedDataset],
+        selected_plot_labels: list[str],
+    ) -> pn.pane.Alert | None:
+        if not self.preprocessed_by_label:
+            return self._empty_state(
+                "No preprocessed datasets were found. Preprocess a raw batch or "
+                "refresh the catalog after adding `.npz` files.",
+                "warning",
+            )
+
+        if not selected_datasets:
+            return self._empty_state(
+                "Select one or more preprocessed datasets to start plotting.",
+                "info",
+            )
+
+        if not selected_plot_labels:
+            return self._empty_state("Select at least one plot type.", "warning")
+
+        product_ids = sorted({dataset.product_id for dataset in selected_datasets})
+        if len(product_ids) != 1:
+            return self._empty_state(
+                "Datasets must share a single product before plotting. "
+                f"Selected products: {', '.join(product_ids)}. "
+                "Deselect datasets until only one product remains.",
+                "warning",
+            )
+
+        return None
+
+    def _plot_type_for_label(self, plot_label: str) -> str:
+        return next(key for key, value in PLOT_LABELS.items() if value == plot_label)
 
     def _render_plots(self) -> None:
         selected_datasets = self._selected_datasets()
         selected_plot_labels = self._selected_plot_labels()
         self._update_dataset_summary(selected_datasets)
 
-        if not selected_datasets:
-            self.plot_area.objects = [
-                pn.pane.Markdown(
-                    "Select one or more preprocessed datasets to start plotting."
-                )
-            ]
-            return
-
-        if not selected_plot_labels:
-            self.plot_area.objects = [
-                pn.pane.Markdown("Select at least one plot type.")
-            ]
-            return
-
-        product_ids = {dataset.product_id for dataset in selected_datasets}
-        if len(product_ids) != 1:
-            self.plot_area.objects = [
-                pn.pane.Alert(
-                    "Please select datasets from the same product for plotting.",
-                    alert_type="warning",
-                )
-            ]
+        empty_state = self._plot_selection_empty_state(
+            selected_datasets, selected_plot_labels
+        )
+        if empty_state is not None:
+            self.plot_area.objects = [empty_state]
             return
 
         locators: list[PlotDatasetLocator] = [
@@ -393,17 +504,14 @@ class OrderbookDashboard:
         plot_panes = []
 
         for plot_label in selected_plot_labels:
-            plot_type = next(
-                key for key, value in PLOT_LABELS.items() if value == plot_label
-            )
+            plot_type = self._plot_type_for_label(plot_label)
             if any(
                 plot_type not in dataset.available_views
                 for dataset in selected_datasets
             ):
                 plot_panes.append(
-                    pn.pane.Alert(
-                        f"{plot_label} is unavailable because one or more selected datasets do not advertise that view.",
-                        alert_type="warning",
+                    self._unsupported_plot_state(
+                        plot_label, plot_type, selected_datasets
                     )
                 )
                 continue
@@ -411,15 +519,10 @@ class OrderbookDashboard:
             try:
                 plot_panes.append(self._build_plot_pane(plot_type, locators))
             except Exception as error:
-                plot_panes.append(
-                    pn.pane.Alert(
-                        f"Failed to render {plot_label}: {error}",
-                        alert_type="danger",
-                    )
-                )
+                plot_panes.append(self._render_error_state(plot_label, error))
 
         self.plot_area.objects = plot_panes or [
-            pn.pane.Markdown("No plots are available for the current selection.")
+            self._empty_state("No plots are available for the current selection.")
         ]
 
     def _card(
@@ -486,12 +589,14 @@ class OrderbookDashboard:
     def build_dataset_section(self) -> pn.Card:
         return self._card(
             self.preprocessed_select,
+            self.dataset_summary,
             title="Dataset selection",
         )
 
     def build_sidebar(self) -> pn.Column:
         raw_batch_section = self._card(
             self.raw_select,
+            self.raw_summary,
             pn.Row(
                 self.preprocess_button,
                 sizing_mode="stretch_width",
@@ -518,10 +623,6 @@ class OrderbookDashboard:
             self.plot_select,
             title="Plot controls",
         )
-        summary = self._card(
-            self.dataset_summary,
-            title="Selected dataset summary",
-        )
         workspace = self._card(
             self.plot_area,
             title="Plot workspace",
@@ -535,7 +636,6 @@ class OrderbookDashboard:
                 "Inspect order book depth and companion Plotly analytics in one workspace.",
             ),
             plot_controls,
-            summary,
             workspace,
             sizing_mode="stretch_both",
             min_width=320,
