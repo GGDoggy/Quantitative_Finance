@@ -1,11 +1,11 @@
-"""Register dashboard plot types with their lazy plot and preprocess builders."""
+"""Register plot types with their lazy plot and preprocess builders."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gui.data_catalog import PlotDatasetLocator
+    from src.preprocess.catalog import PlotDatasetLocator
 
 
 PlotBuilder = Callable[[list["PlotDatasetLocator"]], object]
@@ -23,36 +23,47 @@ class PlotSpec:
 
 def build_orderbook_view(locators: list["PlotDatasetLocator"]):
     from src.plots.orderbook import build_orderbook_view as implementation
+
     return implementation(locators)
 
 
 def build_trades_scatter_view(locators: list["PlotDatasetLocator"]):
     from src.plots.trades_scatter import build_trades_scatter_view as implementation
+
     return implementation(locators)
 
 
 def build_trade_volume_timeline_view(locators: list["PlotDatasetLocator"]):
-    from src.plots.trade_volume_timeline import build_trade_volume_timeline_view as implementation
+    from src.plots.trade_volume_timeline import (
+        build_trade_volume_timeline_view as implementation,
+    )
+
     return implementation(locators)
 
 
 def build_fill_probability_view(locators: list["PlotDatasetLocator"]):
     from src.plots.fill_probability import build_fill_probability_view as implementation
+
     return implementation(locators)
 
 
 def build_orderbook_payload(context: object) -> dict[str, object]:
     from src.preprocess.orderbook import build_orderbook_payload as implementation
+
     return implementation(context)
 
 
 def build_trades_scatter_payload(context: object) -> dict[str, object]:
     from src.preprocess.trades_scatter import build_trades_scatter_payload as implementation
+
     return implementation(context)
 
 
 def build_trade_volume_timeline_payload(context: object) -> dict[str, object]:
-    from src.preprocess.trade_volume_timeline import build_trade_volume_timeline_payload as implementation
+    from src.preprocess.trade_volume_timeline import (
+        build_trade_volume_timeline_payload as implementation,
+    )
+
     return implementation(context)
 
 

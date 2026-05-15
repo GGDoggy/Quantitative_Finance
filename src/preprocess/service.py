@@ -7,17 +7,18 @@ from typing import Callable
 
 import numpy as np
 
-from gui.data_catalog import (
+from src.plots.registry import PLOT_REGISTRY
+from src.preprocess.catalog import (
     PreprocessedDataset,
     RawBatch,
     discover_preprocessed_datasets,
     format_time_step,
 )
 from src.preprocess.common import build_context
-from gui.registry import PLOT_REGISTRY
 
 
 DEFAULT_TIME_STEP = 0.01
+
 
 def _merge_payload_chunk(base_payload: dict[str, object], chunk: dict[str, object]) -> None:
     for key, value in chunk.items():
@@ -27,7 +28,11 @@ def _merge_payload_chunk(base_payload: dict[str, object], chunk: dict[str, objec
 
         existing = base_payload[key]
         if isinstance(existing, np.ndarray) and isinstance(value, np.ndarray):
-            if existing.shape != value.shape or not np.array_equal(existing, value, equal_nan=True):
+            if existing.shape != value.shape or not np.array_equal(
+                existing,
+                value,
+                equal_nan=True,
+            ):
                 raise ValueError(f"Conflicting preprocess outputs for key '{key}'.")
             continue
 
@@ -98,7 +103,9 @@ def preprocess_batches(
     for index, batch in enumerate(batches, start=1):
         if progress_callback is not None:
             progress_callback(f"[{index}/{total}] preprocessing {batch.display_name}")
-        results.append(preprocess_batch(batch, output_dir=output_dir, time_step=time_step))
+        results.append(
+            preprocess_batch(batch, output_dir=output_dir, time_step=time_step)
+        )
 
     if progress_callback is not None and batches:
         progress_callback(f"Finished preprocessing {len(batches)} batch(es).")

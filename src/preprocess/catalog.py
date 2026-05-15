@@ -1,4 +1,4 @@
-"""Catalog raw Coinbase CSV batches and preprocessed plot datasets for the dashboard."""
+"""Catalog raw Coinbase CSV batches and preprocessed plot datasets."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,14 +11,19 @@ from typing import Iterable, MutableMapping
 
 import numpy as np
 
-from gui.registry import PLOT_REGISTRY
+from src.plots.errors import PreprocessedDataError
+from src.plots.registry import PLOT_REGISTRY
 
 
 SIMULATION_VIEW_KEY = "fill_probability"
 
 
-RAW_LEVEL2_INIT_RE = re.compile(r"^level2-(?P<product_id>.+)-init-(?P<timestamp>\d{8}\.\d{6})\.csv$")
-RAW_LEVEL2_UPDATES_RE = re.compile(r"^level2-(?P<product_id>.+)-updates-(?P<timestamp>\d{8}\.\d{6})\.csv$")
+RAW_LEVEL2_INIT_RE = re.compile(
+    r"^level2-(?P<product_id>.+)-init-(?P<timestamp>\d{8}\.\d{6})\.csv$"
+)
+RAW_LEVEL2_UPDATES_RE = re.compile(
+    r"^level2-(?P<product_id>.+)-updates-(?P<timestamp>\d{8}\.\d{6})\.csv$"
+)
 RAW_TRADE_RE = re.compile(r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})\.csv$")
 TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
 PREPROCESSED_RE = re.compile(
@@ -29,10 +34,6 @@ SIMULATION_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
     rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT}).*simulation.*\.npz$"
 )
-
-
-class PreprocessedDataError(RuntimeError):
-    pass
 
 
 def format_time_step(time_step: float | str | Decimal) -> str:
@@ -209,7 +210,9 @@ class PreprocessedDataset:
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
     if not path.exists():
         return []
-    return sorted(entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix)
+    return sorted(
+        entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix
+    )
 
 
 def detect_available_views(
@@ -219,9 +222,7 @@ def detect_available_views(
     try:
         with np.load(path, allow_pickle=False) as data:
             if "available_views" in data.files:
-                available_views = tuple(
-                    str(view) for view in data["available_views"].tolist()
-                )
+                available_views = tuple(str(view) for view in data["available_views"].tolist())
             else:
                 data_keys = set(data.files)
                 available_views = tuple(
@@ -307,9 +308,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
 
             entry["orderbook_path"] = file_path
             entry["time_step_token"] = time_step_token
-            entry["orderbook_views"] = _union_available_views(
-                available_views,
-            )
+            entry["orderbook_views"] = _union_available_views(available_views)
             continue
 
         simulation_paths = entry["simulation_paths"]
@@ -346,9 +345,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                     timestamp=str(entry["timestamp"]),
                     time_step=float(entry["time_step"]),
                     path=(
-                        orderbook_path
-                        if isinstance(orderbook_path, Path)
-                        else simulation_path
+                        orderbook_path if isinstance(orderbook_path, Path) else simulation_path
                     ),
                     available_views=_union_available_views(
                         base_views,
@@ -417,7 +414,9 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
     return batches
 
 
-def load_preprocessed_payload(dataset: PreprocessedDataset | PlotDatasetLocator) -> dict[str, object]:
+def load_preprocessed_payload(
+    dataset: PreprocessedDataset | PlotDatasetLocator,
+) -> dict[str, object]:
     path = dataset.path
     cache = dataset.payload_cache if isinstance(dataset, PlotDatasetLocator) else None
     if cache is not None and path in cache:

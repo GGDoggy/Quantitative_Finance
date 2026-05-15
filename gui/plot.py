@@ -10,16 +10,16 @@ import holoviews as hv
 import panel as pn
 from plotly.graph_objects import Figure
 
-from gui.data_catalog import (
+from src.plots import PLOT_LABELS, PLOT_REGISTRY
+from src.preprocess import (
     PlotDatasetLocator,
     PreprocessedDataset,
     discover_preprocessed_datasets,
     discover_raw_batches,
     format_time_step,
     parse_timestamp,
+    preprocess_batches,
 )
-from gui.registry import PLOT_LABELS, PLOT_REGISTRY
-from gui.preprocess_service import preprocess_batches
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "v3"
@@ -122,6 +122,14 @@ body, .bk, .pn-template {
   width: 100%;
 }
 
+.qf-fill-probability-card {
+  min-height: 1660px;
+}
+
+.qf-fill-probability-result {
+  min-height: 1560px;
+}
+
 .qf-plot-tabs {
   width: 100%;
 }
@@ -168,6 +176,14 @@ body, .bk, .pn-template {
 
   .qf-plot-result {
     min-height: 420px;
+  }
+
+  .qf-fill-probability-card {
+    min-height: 1320px;
+  }
+
+  .qf-fill-probability-result {
+    min-height: 1240px;
   }
 }
 """
@@ -575,11 +591,13 @@ class OrderbookDashboard:
         if isinstance(plot, Figure):
             themed_plot = Figure(plot)
             themed_plot.update_layout(**PLOTLY_DARK_LAYOUT)
+            plot_height = 1560 if plot_type == "fill_probability" else 560
             return pn.pane.Plotly(
                 themed_plot,
                 config={"responsive": True},
-                sizing_mode="stretch_both",
-                min_height=560,
+                sizing_mode="stretch_width",
+                height=plot_height,
+                min_height=plot_height,
             )
         return pn.pane.HoloViews(plot, sizing_mode="stretch_both", min_height=560)
 
@@ -910,6 +928,7 @@ class OrderbookDashboard:
 
     def _plot_card(
         self,
+        plot_type: str,
         plot_label: str,
         selected_dataset_count: int,
         result_pane: pn.viewable.Viewable,
@@ -924,10 +943,15 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
             margin=(0, 0, 10, 0),
         )
+        result_classes = ["qf-plot-result"]
+        card_classes = ["qf-main-plot-card", *(css_classes or [])]
+        if plot_type == "fill_probability":
+            result_classes.append("qf-fill-probability-result")
+            card_classes.append("qf-fill-probability-card")
         result_container = pn.Column(
             result_pane,
             sizing_mode="stretch_both",
-            css_classes=["qf-plot-result"],
+            css_classes=result_classes,
             margin=(0, 0, 12, 0),
         )
         objects = [metadata]
@@ -938,7 +962,7 @@ class OrderbookDashboard:
             *objects,
             title=plot_label,
             sizing_mode="stretch_both",
-            css_classes=["qf-main-plot-card", *(css_classes or [])],
+            css_classes=card_classes,
             margin=(0, 0, 0, 0),
         )
 
@@ -966,6 +990,7 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
         )
         return self._plot_card(
+            plot_type,
             plot_label,
             len(selected_datasets),
             details,
@@ -982,7 +1007,11 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
         )
         return self._plot_card(
-            plot_label, selected_dataset_count, result_placeholder, error=error
+            "unknown",
+            plot_label,
+            selected_dataset_count,
+            result_placeholder,
+            error=error,
         )
 
     def _plot_selection_empty_state(self) -> pn.pane.Alert | None:
@@ -1053,8 +1082,35 @@ class OrderbookDashboard:
         ]
         selected_dataset_count = len(selected_datasets)
 
-        try:
-            result_pane = self._build_plot_pane(plot_type, locators)
+        for plot_label in selected_plot_labels:
+            plot_type = self._plot_type_for_label(plot_label)
+            if any(
+                plot_type not in dataset.available_views
+                for dataset in selected_datasets
+            ):
+                plot_cards.append(
+                    self._unsupported_plot_card(
+                        plot_label, plot_type, selected_datasets
+                    )
+                )
+                continue
+
+            try:
+                result_pane = self._build_plot_pane(plot_type, locators)
+                plot_cards.append(
+                    self._plot_card(
+                        plot_type,
+                        plot_label, selected_dataset_count, result_pane
+                    )
+                )
+            except Exception as error:
+                plot_cards.append(
+                    self._render_error_card(
+                        plot_label, selected_dataset_count, error
+                    )
+                )
+
+        if not plot_cards:
             self.plot_area.objects = [
                 self._plot_card(plot_label, selected_dataset_count, result_pane)
             ]

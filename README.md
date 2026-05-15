@@ -9,16 +9,13 @@ Coinbase market-data collection, visualization, and simulation experiments.
   - Subscribes to `heartbeats`, `level2`, and `market_trades`.
   - Checks `sequence_num` and heartbeat continuity.
   - Writes `level2-*.csv` and `trade-*.csv` in the current working directory.
-- `gui/preprocess.py`
-  - CLI entry point for preprocessing raw `v3` batches.
-  - By default processes batches that do not yet have matching `.npz` outputs.
 - `gui/plot.py`
-  - Starts a Panel dashboard for dataset selection, raw-batch preprocessing, and interactive plots.
+  - UI-only Panel dashboard entry point for dataset selection, raw-batch preprocessing, and interactive plots.
   - Supports `Orderbook`, `Trades Scatter`, `Trade Volume Timeline`, and `Fill Probability`.
 - `src/preprocess/`
-  - Shared preprocessing logic that builds dashboard-ready payloads.
+  - Shared non-UI preprocessing and dataset catalog logic.
 - `src/plots/`
-  - Plot builders for HoloViews/Datashader and Plotly views.
+  - Non-UI plot builders and plot registry definitions.
 - `src/simulation/`
   - Fill-probability simulation utilities and algorithms.
 - `test/`
@@ -29,6 +26,7 @@ Coinbase market-data collection, visualization, and simulation experiments.
 - `server/websocket.py` only supports one product at a time.
 - Timestamps in generated filenames are UTC.
 - `gui.plot` serves a local app with `show=True`.
+- No standalone preprocess CLI entry point is currently provided.
 
 ## Data Layout
 

@@ -1,1 +1,1 @@
-"""GUI package for interactive preprocessing and visualization."""
+"""UI package for the interactive Panel dashboard."""

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .errors import PreprocessedDataError
-from .types import PlotDatasetLocator
+from src.preprocess.catalog import PlotDatasetLocator
 
 
 ORDERBOOK_REQUIRED_KEYS = ("price_axis", "time_axis", "data", "bid", "ask")
