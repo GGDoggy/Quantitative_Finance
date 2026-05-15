@@ -109,6 +109,7 @@ def simulate_virtual_best_orders(
 
     active_bid_order = None
     active_ask_order = None
+    pending_update_reference = None
     next_submit_time = simulation_start
 
     while event_index < len(events) or next_submit_time is not None:
@@ -174,12 +175,16 @@ def simulate_virtual_best_orders(
                 )
                 continue
 
-            previous_bid_price = best_bid_price
-            previous_bid_size = best_bid_size
-            previous_ask_price = best_ask_price
-            previous_ask_size = best_ask_size
-            previous_bid_index = best_bid_index
-            previous_ask_index = best_ask_index
+            if pending_update_reference is None or pending_update_reference[0] != event_time:
+                pending_update_reference = (
+                    event_time,
+                    best_bid_price,
+                    best_bid_size,
+                    best_ask_price,
+                    best_ask_size,
+                    best_bid_index,
+                    best_ask_index,
+                )
 
             updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
             best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
@@ -208,6 +213,20 @@ def simulate_virtual_best_orders(
                 event_side=event_side,
                 updated_index=updated_index,
             )
+
+            if _has_more_events_at_time(events, event_index, event_time):
+                continue
+
+            (
+                _reference_time,
+                previous_bid_price,
+                previous_bid_size,
+                previous_ask_price,
+                previous_ask_size,
+                previous_bid_index,
+                previous_ask_index,
+            ) = pending_update_reference
+            pending_update_reference = None
 
             bid_consumed = reconcile_one_side(
                 "bid",
@@ -247,9 +266,6 @@ def simulate_virtual_best_orders(
                 active_bid_order = None
             if active_ask_order is not None and active_ask_order.result != -1:
                 active_ask_order = None
-
-            if _has_more_events_at_time(events, event_index, event_time):
-                continue
 
             if active_bid_order is None or active_ask_order is None:
                 debug_best_state(

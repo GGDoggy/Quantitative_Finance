@@ -1,6 +1,10 @@
 import numpy as np
 
-from .event_balanced import _append_new_best_orders, _clamp_unresolved_orders
+from .event_balanced import (
+    _append_new_best_orders,
+    _clamp_unresolved_orders,
+    _has_more_events_at_time,
+)
 from .time_averaged_random_cancellation import (
     advance_best_ask_index,
     advance_best_bid_index,
@@ -23,8 +27,8 @@ from .time_averaged_random_cancellation import (
 ALGORITHM_NAME = "best_size_changed"
 
 
-def _has_unresolved_orders(orders_by_price):
-    return any(order.result == -1 for bucket in orders_by_price.values() for order in bucket)
+def _count_unresolved_orders(orders_by_price):
+    return sum(order.result == -1 for bucket in orders_by_price.values() for order in bucket)
 
 
 def _size_changed(previous_size, current_size):
@@ -49,6 +53,7 @@ def _append_bid_order(
     )
     if bid_order is not None:
         get_orders_bucket(bid_orders_by_price, best_bid_index).append(bid_order)
+    return bid_order
 
 
 def _append_ask_order(
@@ -69,6 +74,7 @@ def _append_ask_order(
     )
     if ask_order is not None:
         get_orders_bucket(ask_orders_by_price, best_ask_index).append(ask_order)
+    return ask_order
 
 
 def simulate_virtual_best_orders(
@@ -109,6 +115,8 @@ def simulate_virtual_best_orders(
 
     bid_orders_by_price = {}
     ask_orders_by_price = {}
+    unresolved_order_counts = {"bid": 0, "ask": 0}
+    pending_update_reference = None
 
     next_submit_time = simulation_start
 
@@ -161,8 +169,7 @@ def simulate_virtual_best_orders(
                     continue
 
                 trade_key = side_to_trade_key(event_side)
-                orders_by_price = bid_orders_by_price if trade_key == "bid" else ask_orders_by_price
-                if not _has_unresolved_orders(orders_by_price):
+                if unresolved_order_counts[trade_key] <= 0:
                     pending_trade_evidence[trade_key].clear()
                     continue
 
@@ -175,12 +182,16 @@ def simulate_virtual_best_orders(
                 )
                 continue
 
-            previous_bid_price = best_bid_price
-            previous_bid_size = best_bid_size
-            previous_ask_price = best_ask_price
-            previous_ask_size = best_ask_size
-            previous_bid_index = best_bid_index
-            previous_ask_index = best_ask_index
+            if pending_update_reference is None or pending_update_reference[0] != event_time:
+                pending_update_reference = (
+                    event_time,
+                    best_bid_price,
+                    best_bid_size,
+                    best_ask_price,
+                    best_ask_size,
+                    best_bid_index,
+                    best_ask_index,
+                )
 
             updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
             best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
@@ -210,6 +221,20 @@ def simulate_virtual_best_orders(
                 updated_index=updated_index,
             )
 
+            if _has_more_events_at_time(events, event_index, event_time):
+                continue
+
+            (
+                _reference_time,
+                previous_bid_price,
+                previous_bid_size,
+                previous_ask_price,
+                previous_ask_size,
+                previous_bid_index,
+                previous_ask_index,
+            ) = pending_update_reference
+            pending_update_reference = None
+
             bid_consumed = reconcile_one_side(
                 "bid",
                 bid_orders_by_price,
@@ -235,8 +260,10 @@ def simulate_virtual_best_orders(
 
             if bid_consumed:
                 pending_trade_evidence["bid"].clear()
+                unresolved_order_counts["bid"] = _count_unresolved_orders(bid_orders_by_price)
             if ask_consumed:
                 pending_trade_evidence["ask"].clear()
+                unresolved_order_counts["ask"] = _count_unresolved_orders(ask_orders_by_price)
 
             if next_submit_time is not None and event_time <= next_submit_time:
                 continue
@@ -258,7 +285,7 @@ def simulate_virtual_best_orders(
                     event_time=event_time,
                     event_type="submit_bid",
                 )
-                _append_bid_order(
+                bid_order = _append_bid_order(
                     bid_orders_by_price,
                     best_bid_index,
                     current_bid_size,
@@ -267,6 +294,8 @@ def simulate_virtual_best_orders(
                     current_bid_price,
                     base_tick,
                 )
+                if bid_order is not None:
+                    unresolved_order_counts["bid"] += 1
 
             if _size_changed(previous_ask_size, current_ask_size):
                 debug_best_state(
@@ -282,7 +311,7 @@ def simulate_virtual_best_orders(
                     event_time=event_time,
                     event_type="submit_ask",
                 )
-                _append_ask_order(
+                ask_order = _append_ask_order(
                     ask_orders_by_price,
                     best_ask_index,
                     current_ask_size,
@@ -291,6 +320,8 @@ def simulate_virtual_best_orders(
                     current_ask_price,
                     base_tick,
                 )
+                if ask_order is not None:
+                    unresolved_order_counts["ask"] += 1
 
             if next_submit_time is not None and event_time >= next_submit_time:
                 next_submit_time = None
@@ -319,7 +350,7 @@ def simulate_virtual_best_orders(
             event_time=next_submit_time,
             event_type="submit",
         )
-        _append_new_best_orders(
+        bid_order, ask_order = _append_new_best_orders(
             bid_orders_by_price,
             ask_orders_by_price,
             best_bid_index,
@@ -331,6 +362,10 @@ def simulate_virtual_best_orders(
             next_submit_time,
             base_tick,
         )
+        if bid_order is not None:
+            unresolved_order_counts["bid"] += 1
+        if ask_order is not None:
+            unresolved_order_counts["ask"] += 1
         next_submit_time = None
 
     bid_orders = [order for bucket in bid_orders_by_price.values() for order in bucket]
