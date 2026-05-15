@@ -188,6 +188,7 @@ def _add_grid_traces(
     show_count_scale: bool,
     probability_colorbar_y: float,
     count_colorbar_y: float,
+    count_zmax: float | None = None,
 ) -> None:
     near_edges, opp_edges, fill_probability, sample_count = compute_fill_probability_grid(
         near_size,
@@ -221,6 +222,8 @@ def _add_grid_traces(
             sample_count,
             "Magma",
             name=count_title,
+            zmin=0.0,
+            zmax=count_zmax,
             colorbar_title="Sample Count" if show_count_scale else None,
             showscale=show_count_scale,
             colorbar_x=1.01 if show_count_scale else None,
@@ -230,6 +233,31 @@ def _add_grid_traces(
         row=2,
         col=count_col,
     )
+
+
+def _shared_sample_count_zmax(
+    *orders: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> float | None:
+    sample_count_maxima = []
+
+    for near_size, opp_size, result in orders:
+        _, _, _, sample_count = compute_fill_probability_grid(
+            near_size,
+            opp_size,
+            result,
+            BINS,
+        )
+        if sample_count.size > 0:
+            sample_count_maxima.append(float(np.nanmax(sample_count)))
+
+    if not sample_count_maxima:
+        return None
+
+    shared_zmax = max(sample_count_maxima)
+    if shared_zmax <= 0:
+        return None
+
+    return shared_zmax
 
 
 def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure:
@@ -242,6 +270,11 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         ask_opp_size,
         ask_result,
     ) = load_simulation_arrays(simulation_paths)
+
+    shared_count_zmax = _shared_sample_count_zmax(
+        (bid_near_size, bid_opp_size, bid_result),
+        (ask_near_size, ask_opp_size, ask_result),
+    )
 
     figure = make_subplots(
         rows=2,
@@ -269,6 +302,7 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         show_count_scale=True,
         probability_colorbar_y=0.79,
         count_colorbar_y=0.21,
+        count_zmax=shared_count_zmax,
     )
     _add_grid_traces(
         figure,
@@ -283,6 +317,7 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         show_count_scale=False,
         probability_colorbar_y=0.79,
         count_colorbar_y=0.21,
+        count_zmax=shared_count_zmax,
     )
 
     for row in (1, 2):
