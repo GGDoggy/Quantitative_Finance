@@ -204,7 +204,7 @@ class OrderbookDashboard:
         )
         self.plot_select = pn.widgets.MultiChoice(
             name="Plots",
-            value=["Orderbook"],
+            value=[],
             options=list(PLOT_LABELS.values()),
             sizing_mode="stretch_width",
         )
@@ -277,9 +277,6 @@ class OrderbookDashboard:
 
         self.raw_select.options = list(self.raw_by_label.keys())
         self.raw_select.value = existing_raw
-
-        if not self.preprocessed_select.value and datasets:
-            self.preprocessed_select.value = [datasets[0].display_name]
 
         self._update_raw_summary()
         self._render_plots()
