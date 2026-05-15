@@ -19,10 +19,138 @@ from gui.data_catalog import (
 from gui.registry import PLOT_LABELS, PLOT_REGISTRY
 from gui.preprocess_service import preprocess_batches
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "v3"
 PREPROCESSED_DIR = PROJECT_ROOT / "data" / "preprocessed"
+
+DASHBOARD_CSS = """
+:root {
+  --qf-bg: #020617;
+  --qf-surface: #0b1220;
+  --qf-surface-elevated: #111827;
+  --qf-border: rgba(148, 163, 184, 0.22);
+  --qf-primary: #22d3ee;
+  --qf-accent: #3b82f6;
+  --qf-success: #22c55e;
+  --qf-warning: #f59e0b;
+  --qf-danger: #f43f5e;
+  --qf-text: #e5eefb;
+  --qf-muted: #94a3b8;
+}
+
+body, .bk, .pn-template {
+  background: radial-gradient(circle at top left, rgba(34, 211, 238, 0.10), transparent 28rem),
+    linear-gradient(135deg, #020617 0%, #07111f 45%, #030712 100%) !important;
+  color: var(--qf-text) !important;
+}
+
+.pn-template .pn-wrapper, .pn-template .main {
+  background: transparent !important;
+}
+
+.qf-dashboard-header {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--qf-border);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(17, 24, 39, 0.88));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+}
+
+.qf-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--qf-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.qf-title h1, .qf-section-title h2 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.qf-title p, .qf-section-subtitle {
+  color: var(--qf-muted);
+}
+
+.qf-card {
+  border: 1px solid var(--qf-border) !important;
+  border-radius: 16px !important;
+  background: rgba(15, 23, 42, 0.78) !important;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24) !important;
+  backdrop-filter: blur(14px);
+}
+
+.qf-card .card-header {
+  border-bottom: 1px solid var(--qf-border) !important;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.12), rgba(59, 130, 246, 0.08)) !important;
+  color: #f8fafc !important;
+  font-weight: 700;
+}
+
+.qf-card .card-body {
+  padding: 1rem !important;
+}
+
+.qf-button-row {
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.qf-plot-workspace {
+  min-height: 540px;
+}
+
+.qf-status-card .alert-success {
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.qf-status-card .alert-warning {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.qf-status-card .alert-danger {
+  border-color: rgba(244, 63, 94, 0.55);
+}
+
+.qf-card button, .qf-dashboard-header button {
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+}
+
+.qf-card label, .qf-card .bk-input-group label {
+  color: var(--qf-muted) !important;
+  font-weight: 650;
+}
+
+.qf-card .bk-input, .qf-card .bk-input-group, .qf-card select {
+  color: var(--qf-text) !important;
+}
+
+@media (max-width: 900px) {
+  .qf-dashboard-header {
+    padding: 0.9rem;
+  }
+
+  .qf-responsive-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .qf-plot-workspace {
+    min-height: 420px;
+  }
+}
+"""
+
+PLOTLY_DARK_LAYOUT = {
+    "template": "plotly_dark",
+    "paper_bgcolor": "rgba(2, 6, 23, 0)",
+    "plot_bgcolor": "rgba(15, 23, 42, 0.92)",
+    "font": {"color": "#e5eefb"},
+    "margin": {"l": 56, "r": 32, "t": 54, "b": 48},
+}
 
 
 class OrderbookDashboard:
@@ -31,7 +159,9 @@ class OrderbookDashboard:
         self.preprocessed_dir = preprocessed_dir
         self.preprocessed_by_label: dict[str, PreprocessedDataset] = {}
         self.raw_by_label = {}
-        self.status = pn.pane.Alert("Ready.", alert_type="light", sizing_mode="stretch_width")
+        self.status = pn.pane.Alert(
+            "Ready.", alert_type="light", sizing_mode="stretch_width"
+        )
         self.preprocessed_select = pn.widgets.MultiChoice(
             name="Preprocessed datasets",
             options=[],
@@ -55,7 +185,11 @@ class OrderbookDashboard:
             button_type="default",
             width=170,
         )
-        self.preprocess_button = pn.widgets.Button(name="Preprocess Selected", button_type="primary", sizing_mode="stretch_width")
+        self.preprocess_button = pn.widgets.Button(
+            name="Preprocess Selected",
+            button_type="primary",
+            sizing_mode="stretch_width",
+        )
         self.dataset_summary = pn.pane.Markdown(
             "No dataset selected.",
             sizing_mode="stretch_width",
@@ -65,7 +199,9 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
         )
         self.plot_area = pn.Column(
-            pn.pane.Markdown("Select one or more preprocessed datasets to start plotting."),
+            pn.pane.Markdown(
+                "Select one or more preprocessed datasets to start plotting."
+            ),
             sizing_mode="stretch_both",
         )
 
@@ -79,15 +215,21 @@ class OrderbookDashboard:
     def refresh_catalog(self) -> None:
         datasets = discover_preprocessed_datasets(self.preprocessed_dir)
         batches = discover_raw_batches(self.raw_dir, self.preprocessed_dir)
-        self.preprocessed_by_label = {dataset.display_name: dataset for dataset in datasets}
+        self.preprocessed_by_label = {
+            dataset.display_name: dataset for dataset in datasets
+        }
         self.raw_by_label = {
-            batch.display_name: batch
-            for batch in batches
-            if not batch.is_preprocessed
+            batch.display_name: batch for batch in batches if not batch.is_preprocessed
         }
 
-        existing_preprocessed = [label for label in self.preprocessed_select.value if label in self.preprocessed_by_label]
-        existing_raw = [label for label in self.raw_select.value if label in self.raw_by_label]
+        existing_preprocessed = [
+            label
+            for label in self.preprocessed_select.value
+            if label in self.preprocessed_by_label
+        ]
+        existing_raw = [
+            label for label in self.raw_select.value if label in self.raw_by_label
+        ]
 
         self.preprocessed_select.options = list(self.preprocessed_by_label.keys())
         self.preprocessed_select.value = existing_preprocessed
@@ -109,20 +251,30 @@ class OrderbookDashboard:
         self._set_status("Catalog refreshed.", "success")
 
     def _handle_preprocess(self, _event) -> None:
-        selected_batches = [self.raw_by_label[label] for label in self.raw_select.value if label in self.raw_by_label]
+        selected_batches = [
+            self.raw_by_label[label]
+            for label in self.raw_select.value
+            if label in self.raw_by_label
+        ]
         if not selected_batches:
             self.preprocess_progress.object = "No preprocess job running."
-            self._set_status("Select at least one raw batch before preprocessing.", "warning")
+            self._set_status(
+                "Select at least one raw batch before preprocessing.", "warning"
+            )
             return
 
-        self.preprocess_progress.object = f"Queued {len(selected_batches)} raw batch(es) for preprocessing."
+        self.preprocess_progress.object = (
+            f"Queued {len(selected_batches)} raw batch(es) for preprocessing."
+        )
         self.preprocess_button.disabled = True
         try:
             progress_messages: list[str] = []
 
             def update_progress(message: str) -> None:
                 progress_messages.append(message)
-                progress_text = "\n".join(f"- {progress_message}" for progress_message in progress_messages)
+                progress_text = "\n".join(
+                    f"- {progress_message}" for progress_message in progress_messages
+                )
                 self.preprocess_progress.object = progress_text
                 self._set_status(progress_text, "primary")
 
@@ -135,11 +287,18 @@ class OrderbookDashboard:
             new_labels = [
                 dataset.display_name
                 for dataset in self.preprocessed_by_label.values()
-                if (dataset.product_id, dataset.timestamp) in {(batch.product_id, batch.timestamp) for batch in selected_batches}
+                if (dataset.product_id, dataset.timestamp)
+                in {(batch.product_id, batch.timestamp) for batch in selected_batches}
             ]
-            self.preprocessed_select.value = sorted(set(self.preprocessed_select.value + new_labels))
-            self.preprocess_progress.object = f"Completed preprocessing {len(selected_batches)} batch(es)."
-            self._set_status(f"Preprocessed {len(selected_batches)} batch(es).", "success")
+            self.preprocessed_select.value = sorted(
+                set(self.preprocessed_select.value + new_labels)
+            )
+            self.preprocess_progress.object = (
+                f"Completed preprocessing {len(selected_batches)} batch(es)."
+            )
+            self._set_status(
+                f"Preprocessed {len(selected_batches)} batch(es).", "success"
+            )
         except Exception as error:
             self.preprocess_progress.object = f"Preprocess failed: {error}"
             self._set_status(f"Preprocess failed: {error}", "danger")
@@ -149,11 +308,17 @@ class OrderbookDashboard:
     def _handle_selection_change(self, _event) -> None:
         self._render_plots()
 
-    def _build_plot_pane(self, plot_type: str, locators: list[PlotDatasetLocator]) -> pn.viewable.Viewable:
+    def _build_plot_pane(
+        self, plot_type: str, locators: list[PlotDatasetLocator]
+    ) -> pn.viewable.Viewable:
         builder = PLOT_REGISTRY[plot_type].plot_builder
         plot = builder(locators)
         if isinstance(plot, Figure):
-            return pn.pane.Plotly(plot, config={"responsive": True}, sizing_mode="stretch_width")
+            themed_plot = Figure(plot)
+            themed_plot.update_layout(**PLOTLY_DARK_LAYOUT)
+            return pn.pane.Plotly(
+                themed_plot, config={"responsive": True}, sizing_mode="stretch_width"
+            )
         return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
 
     def _selected_datasets(self) -> list[PreprocessedDataset]:
@@ -165,23 +330,26 @@ class OrderbookDashboard:
 
     def _selected_plot_labels(self) -> list[str]:
         return [
-            label
-            for label in self.plot_select.value
-            if label in PLOT_LABELS.values()
+            label for label in self.plot_select.value if label in PLOT_LABELS.values()
         ]
 
-    def _update_dataset_summary(self, selected_datasets: list[PreprocessedDataset]) -> None:
+    def _update_dataset_summary(
+        self, selected_datasets: list[PreprocessedDataset]
+    ) -> None:
         if not selected_datasets:
             self.dataset_summary.object = "No preprocessed dataset selected."
             return
 
         product_ids = sorted({dataset.product_id for dataset in selected_datasets})
         available_views = sorted(
-            {PLOT_LABELS.get(view, view) for dataset in selected_datasets for view in dataset.available_views}
+            {
+                PLOT_LABELS.get(view, view)
+                for dataset in selected_datasets
+                for view in dataset.available_views
+            }
         )
         dataset_lines = "\n".join(
-            f"- `{dataset.display_name}`"
-            for dataset in selected_datasets
+            f"- `{dataset.display_name}`" for dataset in selected_datasets
         )
         self.dataset_summary.object = (
             f"**Selected dataset count:** {len(selected_datasets)}\n\n"
@@ -196,27 +364,42 @@ class OrderbookDashboard:
         self._update_dataset_summary(selected_datasets)
 
         if not selected_datasets:
-            self.plot_area.objects = [pn.pane.Markdown("Select one or more preprocessed datasets to start plotting.")]
+            self.plot_area.objects = [
+                pn.pane.Markdown(
+                    "Select one or more preprocessed datasets to start plotting."
+                )
+            ]
             return
 
         if not selected_plot_labels:
-            self.plot_area.objects = [pn.pane.Markdown("Select at least one plot type.")]
+            self.plot_area.objects = [
+                pn.pane.Markdown("Select at least one plot type.")
+            ]
             return
 
         product_ids = {dataset.product_id for dataset in selected_datasets}
         if len(product_ids) != 1:
-            self.plot_area.objects = [pn.pane.Alert("Please select datasets from the same product for plotting.", alert_type="warning")]
+            self.plot_area.objects = [
+                pn.pane.Alert(
+                    "Please select datasets from the same product for plotting.",
+                    alert_type="warning",
+                )
+            ]
             return
 
         locators: list[PlotDatasetLocator] = [
-            dataset.to_locator(self.preprocessed_dir)
-            for dataset in selected_datasets
+            dataset.to_locator(self.preprocessed_dir) for dataset in selected_datasets
         ]
         plot_panes = []
 
         for plot_label in selected_plot_labels:
-            plot_type = next(key for key, value in PLOT_LABELS.items() if value == plot_label)
-            if any(plot_type not in dataset.available_views for dataset in selected_datasets):
+            plot_type = next(
+                key for key, value in PLOT_LABELS.items() if value == plot_label
+            )
+            if any(
+                plot_type not in dataset.available_views
+                for dataset in selected_datasets
+            ):
                 plot_panes.append(
                     pn.pane.Alert(
                         f"{plot_label} is unavailable because one or more selected datasets do not advertise that view.",
@@ -235,81 +418,134 @@ class OrderbookDashboard:
                     )
                 )
 
-        self.plot_area.objects = plot_panes or [pn.pane.Markdown("No plots are available for the current selection.")]
+        self.plot_area.objects = plot_panes or [
+            pn.pane.Markdown("No plots are available for the current selection.")
+        ]
+
+    def _card(
+        self,
+        *objects,
+        title: str,
+        css_classes: list[str] | None = None,
+        sizing_mode: str = "stretch_width",
+        margin: tuple[int, int, int, int] = (0, 0, 18, 0),
+    ) -> pn.Card:
+        classes = ["qf-card", *(css_classes or [])]
+        return pn.Card(
+            *objects,
+            title=title,
+            collapsed=False,
+            sizing_mode=sizing_mode,
+            margin=margin,
+            css_classes=classes,
+        )
+
+    def _section_heading(self, title: str, subtitle: str) -> pn.Column:
+        return pn.Column(
+            pn.pane.Markdown(
+                f"## {title}", css_classes=["qf-section-title"], margin=(0, 0, 2, 0)
+            ),
+            pn.pane.Markdown(
+                subtitle, css_classes=["qf-section-subtitle"], margin=(0, 0, 12, 0)
+            ),
+            sizing_mode="stretch_width",
+        )
 
     def build_header(self) -> pn.Row:
         title = pn.Column(
-            "# Orderbook Dashboard",
-            "Coinbase market data catalog, preprocessing, and interactive order book visualizations.",
+            pn.pane.HTML(
+                '<p class="qf-eyebrow">Market microstructure console</p>', margin=0
+            ),
+            pn.pane.Markdown(
+                "# Orderbook Dashboard", css_classes=["qf-title"], margin=(0, 0, 4, 0)
+            ),
+            pn.pane.Markdown(
+                "Coinbase market data catalog, preprocessing, and interactive order book visualizations.",
+                css_classes=["qf-section-subtitle"],
+                margin=0,
+            ),
             sizing_mode="stretch_width",
             margin=(0, 20, 0, 0),
+        )
+        actions = pn.Row(
+            self.refresh_button,
+            sizing_mode="stretch_width",
+            align="center",
+            css_classes=["qf-button-row"],
         )
         return pn.Row(
             title,
             pn.Spacer(sizing_mode="stretch_width"),
-            self.refresh_button,
+            actions,
             sizing_mode="stretch_width",
             align="center",
+            css_classes=["qf-dashboard-header", "qf-responsive-row"],
+            margin=(0, 0, 20, 0),
         )
 
     def build_dataset_section(self) -> pn.Card:
-        return pn.Card(
+        return self._card(
             self.preprocessed_select,
             title="Dataset selection",
-            collapsed=False,
-            sizing_mode="stretch_width",
         )
 
     def build_sidebar(self) -> pn.Column:
-        raw_batch_section = pn.Card(
+        raw_batch_section = self._card(
             self.raw_select,
-            self.preprocess_button,
+            pn.Row(
+                self.preprocess_button,
+                sizing_mode="stretch_width",
+                css_classes=["qf-button-row"],
+            ),
+            self.preprocess_progress,
             title="Raw batch preprocessing",
-            collapsed=False,
-            sizing_mode="stretch_width",
         )
         return pn.Column(
-            "## Controls",
+            self._section_heading(
+                "Controls",
+                "Choose datasets, preprocess raw batches, and refresh the catalog.",
+            ),
             self.build_dataset_section(),
             raw_batch_section,
-            sizing_mode="stretch_height",
-            width=420,
+            sizing_mode="stretch_width",
+            min_width=300,
+            max_width=420,
+            margin=(8, 6, 8, 6),
         )
 
-    def build_plot_section(self) -> pn.Card:
-        plot_controls = pn.Row(
+    def build_plot_section(self) -> pn.Column:
+        plot_controls = self._card(
             self.plot_select,
-            sizing_mode="stretch_width",
+            title="Plot controls",
         )
-        summary = pn.Card(
+        summary = self._card(
             self.dataset_summary,
             title="Selected dataset summary",
-            collapsed=False,
-            sizing_mode="stretch_width",
         )
-        workspace = pn.Card(
+        workspace = self._card(
             self.plot_area,
             title="Plot workspace",
-            collapsed=False,
             sizing_mode="stretch_both",
+            css_classes=["qf-plot-workspace"],
+            margin=(0, 0, 0, 0),
         )
-        return pn.Card(
-            "## Main workspace",
+        return pn.Column(
+            self._section_heading(
+                "Visualization",
+                "Inspect order book depth and companion Plotly analytics in one workspace.",
+            ),
             plot_controls,
             summary,
             workspace,
-            title="Visualization",
-            collapsed=False,
             sizing_mode="stretch_both",
+            min_width=320,
         )
 
     def build_status_section(self) -> pn.Card:
-        return pn.Card(
+        return self._card(
             self.status,
-            self.preprocess_progress,
             title="Status",
-            collapsed=False,
-            sizing_mode="stretch_width",
+            css_classes=["qf-status-card"],
         )
 
     def view(self):
@@ -321,13 +557,21 @@ class OrderbookDashboard:
                 self.build_plot_section(),
                 self.build_status_section(),
             ],
+            theme="dark",
+            accent_base_color="#22d3ee",
+            header_background="#020617",
+            header_color="#f8fafc",
+            background_color="#020617",
+            neutral_color="#1e293b",
+            sidebar_width=420,
+            main_max_width="1440px",
             main_layout=None,
         )
 
 
 def build_app():
     hv.extension("bokeh")
-    pn.extension("plotly")
+    pn.extension("plotly", raw_css=[DASHBOARD_CSS])
     dashboard = OrderbookDashboard(RAW_DATA_DIR, PREPROCESSED_DIR)
     return dashboard.view()
 
