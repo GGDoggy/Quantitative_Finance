@@ -24,3 +24,5 @@ Unfilled, canceled, unresolved, incomplete-quote, or out-of-range records are em
 ### Saved output identity
 
 Saved simulation `.npz` filenames and metadata now include `resolved_time` so runs with different evolved-quote horizons do not overwrite or mask one another.
+
+When callers save both the default horizon and any non-default `resolved_time` for the same dataset, time step, and algorithm, the additional filename component can create multiple `.npz` files that still match `src/plots/discovery.py`'s `find_simulation_files(...)` filter when discovery only checks product, timestamp, and time step. In that scenario, `src/plots/fill_probability.py` can raise `FileExistsError` before plotting, so multi-horizon simulation outputs require discovery to parse or filter by `resolved_time` and likely `algorithm`.
