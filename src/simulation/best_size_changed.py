@@ -31,8 +31,17 @@ def _count_unresolved_orders(orders_by_price):
     return sum(order.result == -1 for bucket in orders_by_price.values() for order in bucket)
 
 
-def _size_changed(previous_size, current_size):
-    return not np.isclose(previous_size, current_size)
+def _price_changed(previous_price, current_price):
+    if np.isnan(previous_price) or np.isnan(current_price):
+        return not (np.isnan(previous_price) and np.isnan(current_price))
+    return not np.isclose(previous_price, current_price)
+
+
+def _best_level_changed(previous_price, previous_size, current_price, current_size):
+    return _price_changed(previous_price, current_price) or not np.isclose(
+        previous_size,
+        current_size,
+    )
 
 
 def _append_bid_order(
@@ -271,7 +280,12 @@ def simulate_virtual_best_orders(
             if event_time < simulation_start:
                 continue
 
-            if _size_changed(previous_bid_size, current_bid_size):
+            if _best_level_changed(
+                previous_bid_price,
+                previous_bid_size,
+                current_bid_price,
+                current_bid_size,
+            ):
                 debug_best_state(
                     "before_submit",
                     orderbook,
@@ -297,7 +311,12 @@ def simulate_virtual_best_orders(
                 if bid_order is not None:
                     unresolved_order_counts["bid"] += 1
 
-            if _size_changed(previous_ask_size, current_ask_size):
+            if _best_level_changed(
+                previous_ask_price,
+                previous_ask_size,
+                current_ask_price,
+                current_ask_size,
+            ):
                 debug_best_state(
                     "before_submit",
                     orderbook,
