@@ -192,6 +192,13 @@ class OrderbookDashboard:
             button_type="primary",
             sizing_mode="stretch_width",
         )
+        self.preprocess_spinner = pn.indicators.LoadingSpinner(
+            value=False,
+            width=24,
+            height=24,
+            color="primary",
+            visible=False,
+        )
         self.dataset_summary = pn.pane.Markdown(
             "No preprocessed datasets discovered.",
             sizing_mode="stretch_width",
@@ -258,6 +265,24 @@ class OrderbookDashboard:
         self.refresh_catalog()
         self._set_status("Catalog refreshed.", "success")
 
+    def _set_preprocess_loading(self, is_loading: bool) -> None:
+        self.preprocess_button.disabled = is_loading
+        self.preprocess_button.loading = is_loading
+        self.preprocess_spinner.value = is_loading
+        self.preprocess_spinner.visible = is_loading
+        self.preprocess_progress.loading = is_loading
+
+    def _format_preprocess_progress(
+        self, batch_count: int, progress_messages: list[str]
+    ) -> str:
+        progress_lines = "\n".join(
+            f"- {progress_message}" for progress_message in progress_messages
+        )
+        return (
+            f"**Processing batch count:** {batch_count}\n\n"
+            f"**Progress**\n{progress_lines}"
+        )
+
     def _handle_preprocess(self, _event) -> None:
         selected_batches = [
             self.raw_by_label[label]
@@ -271,47 +296,56 @@ class OrderbookDashboard:
             )
             return
 
-        self.preprocess_progress.object = (
-            f"Queued {len(selected_batches)} raw batch(es) for preprocessing."
+        batch_count = len(selected_batches)
+        progress_messages = [
+            f"Queued {batch_count} raw batch(es) for preprocessing."
+        ]
+        self.preprocess_progress.object = self._format_preprocess_progress(
+            batch_count, progress_messages
         )
-        self.preprocess_button.disabled = True
+        self._set_status(
+            f"Preprocessing {batch_count} raw batch(es)...", "primary"
+        )
+        self._set_preprocess_loading(True)
         try:
-            progress_messages: list[str] = []
-
             def update_progress(message: str) -> None:
                 progress_messages.append(message)
-                progress_text = "\n".join(
-                    f"- {progress_message}" for progress_message in progress_messages
+                self.preprocess_progress.object = self._format_preprocess_progress(
+                    batch_count, progress_messages
                 )
-                self.preprocess_progress.object = progress_text
-                self._set_status(progress_text, "primary")
+                self._set_status(message, "primary")
 
-            preprocess_batches(
+            preprocessed_datasets = preprocess_batches(
                 selected_batches,
                 output_dir=self.preprocessed_dir,
                 progress_callback=update_progress,
             )
             self.refresh_catalog()
-            new_labels = [
+            new_labels = sorted(
                 dataset.display_name
-                for dataset in self.preprocessed_by_label.values()
-                if (dataset.product_id, dataset.timestamp)
-                in {(batch.product_id, batch.timestamp) for batch in selected_batches}
-            ]
-            self.preprocessed_select.value = sorted(
-                set(self.preprocessed_select.value + new_labels)
+                for dataset in preprocessed_datasets
+                if dataset.display_name in self.preprocessed_by_label
             )
-            self.preprocess_progress.object = (
-                f"Completed preprocessing {len(selected_batches)} batch(es)."
+            if new_labels:
+                self.preprocessed_select.value = new_labels
+            summary = (
+                f"Completed preprocessing {batch_count} batch(es). "
+                f"Generated {len(new_labels)} preprocessed dataset(s)."
             )
-            self._set_status(
-                f"Preprocessed {len(selected_batches)} batch(es).", "success"
+            progress_messages.append(summary)
+            self.preprocess_progress.object = self._format_preprocess_progress(
+                batch_count, progress_messages
             )
+            self._set_status(summary, "success")
         except Exception as error:
-            self.preprocess_progress.object = f"Preprocess failed: {error}"
-            self._set_status(f"Preprocess failed: {error}", "danger")
+            error_message = f"Preprocess failed: {error}"
+            progress_messages.append(error_message)
+            self.preprocess_progress.object = self._format_preprocess_progress(
+                batch_count, progress_messages
+            )
+            self._set_status(error_message, "danger")
         finally:
-            self.preprocess_button.disabled = False
+            self._set_preprocess_loading(False)
 
     def _handle_selection_change(self, _event) -> None:
         self._render_plots()
@@ -599,7 +633,9 @@ class OrderbookDashboard:
             self.raw_summary,
             pn.Row(
                 self.preprocess_button,
+                self.preprocess_spinner,
                 sizing_mode="stretch_width",
+                align="center",
                 css_classes=["qf-button-row"],
             ),
             self.preprocess_progress,
