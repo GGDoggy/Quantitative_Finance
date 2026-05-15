@@ -1,114 +1,111 @@
 # Quantitative Finance Project
 
-Run `websocket.py` with `/server` being root to collect data. It works 24/7 (I wish.)
+Coinbase market-data collection, visualization, and simulation experiments.
 
-You can change websocket setting in `config.json`.
 
-The dashboard is launched from the project root with:
+## Main Components
 
-```bash
-python -m gui.plot
-```
+- `server/websocket.py`
+  - Subscribes to `heartbeats`, `level2`, and `market_trades`.
+  - Checks `sequence_num` and heartbeat continuity.
+  - Writes `level2-*.csv` and `trade-*.csv` in the current working directory.
+- `gui/preprocess.py`
+  - CLI entry point for preprocessing raw `v3` batches.
+  - By default processes batches that do not yet have matching `.npz` outputs.
+- `gui/plot.py`
+  - Starts a Panel dashboard for dataset selection, raw-batch preprocessing, and interactive plots.
+  - Supports `Orderbook`, `Trades Scatter`, `Trade Volume Timeline`, and `Fill Probability`.
+- `src/preprocess/`
+  - Shared preprocessing logic that builds dashboard-ready payloads.
+- `src/plots/`
+  - Plot builders for HoloViews/Datashader and Plotly views.
+- `src/simulation/`
+  - Fill-probability simulation utilities and algorithms.
+- `test/`
+  - Small scripts for legacy plotting and simulation experiments.
 
-`gui.plot` starts a local Panel dashboard for cataloging Coinbase market data, preprocessing raw `data/v3` batches into `data/preprocessed`, and switching between registered interactive plot views. The app now lists available preprocessed datasets and raw batches, supports catalog refresh and selected-batch preprocessing from the UI, warns when selected datasets span multiple products, and reports render errors inside the affected plot card or tab. It no longer behaves as a script that simply plots everything in `/data` and writes static figures to `/fig`.
+## Notes
 
-The timestamps of the files in `/data` are in UTC, as well as those generated in `/server`.
+- `server/websocket.py` only supports one product at a time.
+- Timestamps in generated filenames are UTC.
+- `gui.plot` serves a local app with `show=True`.
 
-## Data Structure
+## Data Layout
 
 ### v1
 
-Store different product of same time period in a `.json` file.
+Snapshot-only JSON format. One file can contain multiple products.
 
 ```json
 {
-    "PRODUCT_ID": {
-        "bid": {PRICE: AMOUNT, ...},
-        "offer": {PRICE: AMOUNT, ...}
-    }, ...
+  "PRODUCT_ID": {
+    "bid": { "PRICE": "AMOUNT" },
+    "offer": { "PRICE": "AMOUNT" }
+  }
 }
 ```
-`v1` data is just snapshot every 10 second.
-
 
 ### v2
 
-Store different product of same time period in a `.json` file.
+JSON event format for multiple products.
 
-#### Level 2
-
-```json
-{
-    "PRODUCT_ID": {
-        TIME: {
-            "type": TYPE,
-            "data": {
-                "bid": {PRICE: AMOUNT, ...},
-                "offer": {PRICE: AMOUNT, ...}
-            }
-        }, ...
-    }, ...
-}
-```
-`TYPE` can be either `"snapshot"` or `"update"`.
-
-`PRICE` and `AMOUNT` are *string*.
-
-#### Market Trades
+`level2`:
 
 ```json
 {
-    "PRODUCT_ID": {
-        TIME: {
-            "BUY": {PRICE: AMOUNT, ...},
-            "SELL": {PRICE: AMOUNT, ...}
-        }, ...
-    }, ...
+  "PRODUCT_ID": {
+    "TIME": {
+      "type": "snapshot or update",
+      "data": {
+        "bid": { "PRICE": "AMOUNT" },
+        "offer": { "PRICE": "AMOUNT" }
+      }
+    }
+  }
 }
 ```
-`PRICE` is *string* and `AMOUNT` is *float*.
+
+`trade`:
+
+```json
+{
+  "PRODUCT_ID": {
+    "TIME": {
+      "BUY": { "PRICE": 0.0 },
+      "SELL": { "PRICE": 0.0 }
+    }
+  }
+}
+```
 
 ### v3
 
-Every `.csv` file contains data of single product.
+Single-product CSV format used by the current pipeline.
 
-#### Level 2
+Level 2 batch:
 
-A complete level 2 data contains two files:
+- `level2-PRODUCT_ID-init-yyyymmdd.hhmmss.csv`
+- `level2-PRODUCT_ID-updates-yyyymmdd.hhmmss.csv`
 
-`level2-PRODUCT_ID-init-yyyymmdd.hhmmss.csv` and `level2-PRODUCT_ID-updates-yyyymmdd.hhmmss.csv`
+Trade batch:
 
-The time should be identical and is the time of the initial order book.
+- `trade-PRODUCT_ID-yyyymmdd.hhmmss.csv`
 
-`init`: The initial order book.
+`init` columns:
 
 | Price | Volume | Side |
 | - | - | - |
-| PRICE 1 | VOLUME 1 | SIDE 1 |
-| ... | ... | ... |
 
-`update`: All updates during the period.
+`updates` columns:
 
 | Time | Price | Volume | Side |
 | - | - | - | - |
-| TIME 1 | PRICE 1 | VOLUME 1 | SIDE 1 |
-| ... | ... | ... | ... |
 
-- `SIDE`: -1 for sell order / +1 for buy order  
-- `TIME`: Seconds from midnight of the filename date
-
-#### Market Trades
-
-File name:
-
-`trade-PRODUCT_ID-yyyymmdd.hhmmss.csv`
-
-The time refers to the very first data.
+`trade` columns:
 
 | Time | Price | Volume | Side |
 | - | - | - | - |
-| TIME 1 | PRICE 1 | VOLUME 1 | SIDE 1 |
-| ... | ... | ... | ... |
 
-- `SIDE`: -1 for buy taker / +1 for sell taker  
-- `TIME`: Seconds from midnight of the filename date
+- In `level2`, `Side` is `-1` for sell and `+1` for buy.
+- In `trade`, `Side` is `-1` for sell maker and `+1` for buy maker.
+- `Time` is measured in seconds from midnight of the filename date.
