@@ -7,7 +7,8 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from gui.data_catalog import PlotDatasetLocator, find_simulation_files
+from .discovery import find_simulation_files
+from .types import PlotDatasetLocator
 
 
 BINS = 20

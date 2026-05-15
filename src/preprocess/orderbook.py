@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from gui.preprocess.common import PreprocessContext, file_time_to_unix
+from .common import PreprocessContext, file_time_to_unix
 
 
 def update_orderbook(orderbook: np.ndarray, price_levels: np.ndarray, price: float, volume: float, side: float) -> None:
