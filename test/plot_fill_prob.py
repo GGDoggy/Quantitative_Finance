@@ -139,6 +139,7 @@ def plot_heatmap(ax, near_edges, opp_edges, values, title, cmap, vmin=None, vmax
     if LOG_SPACED_BINS:
         ax.set_xscale("log")
         ax.set_yscale("log")
+    ax.set_aspect("equal", adjustable="box")
     return mesh
 
 

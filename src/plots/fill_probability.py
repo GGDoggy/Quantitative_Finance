@@ -144,7 +144,22 @@ def _heatmap_trace(
     zmin: float | None = None,
     zmax: float | None = None,
     colorbar_title: str | None = None,
+    showscale: bool = True,
+    colorbar_x: float | None = None,
+    colorbar_y: float | None = None,
+    colorbar_len: float | None = None,
 ) -> go.Heatmap:
+    colorbar = None
+    if colorbar_title is not None:
+        colorbar = {"title": colorbar_title}
+        if colorbar_x is not None:
+            colorbar["x"] = colorbar_x
+        if colorbar_y is not None:
+            colorbar["y"] = colorbar_y
+        if colorbar_len is not None:
+            colorbar["len"] = colorbar_len
+        colorbar["thickness"] = 18
+
     return go.Heatmap(
         x=_bin_centers(near_edges),
         y=_bin_centers(opp_edges),
@@ -153,7 +168,8 @@ def _heatmap_trace(
         zmin=zmin,
         zmax=zmax,
         name=name,
-        colorbar={"title": colorbar_title} if colorbar_title is not None else None,
+        showscale=showscale,
+        colorbar=colorbar,
         hovertemplate="Near Size=%{x}<br>Opp Size=%{y}<br>%{z}<extra></extra>",
     )
 
@@ -168,6 +184,10 @@ def _add_grid_traces(
     count_title: str,
     probability_col: int,
     count_col: int,
+    show_probability_scale: bool,
+    show_count_scale: bool,
+    probability_colorbar_y: float,
+    count_colorbar_y: float,
 ) -> None:
     near_edges, opp_edges, fill_probability, sample_count = compute_fill_probability_grid(
         near_size,
@@ -185,7 +205,11 @@ def _add_grid_traces(
             name=probability_title,
             zmin=0.0,
             zmax=1.0,
-            colorbar_title="Fill Probability",
+            colorbar_title="Fill Probability" if show_probability_scale else None,
+            showscale=show_probability_scale,
+            colorbar_x=1.01 if show_probability_scale else None,
+            colorbar_y=probability_colorbar_y if show_probability_scale else None,
+            colorbar_len=0.34 if show_probability_scale else None,
         ),
         row=1,
         col=probability_col,
@@ -197,7 +221,11 @@ def _add_grid_traces(
             sample_count,
             "Magma",
             name=count_title,
-            colorbar_title="Sample Count",
+            colorbar_title="Sample Count" if show_count_scale else None,
+            showscale=show_count_scale,
+            colorbar_x=1.01 if show_count_scale else None,
+            colorbar_y=count_colorbar_y if show_count_scale else None,
+            colorbar_len=0.34 if show_count_scale else None,
         ),
         row=2,
         col=count_col,
@@ -218,6 +246,8 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
     figure = make_subplots(
         rows=2,
         cols=2,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.04,
         subplot_titles=(
             "Bid Fill Probability",
             "Ask Fill Probability",
@@ -235,6 +265,10 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         count_title="Bid Sample Count",
         probability_col=1,
         count_col=1,
+        show_probability_scale=True,
+        show_count_scale=True,
+        probability_colorbar_y=0.79,
+        count_colorbar_y=0.21,
     )
     _add_grid_traces(
         figure,
@@ -245,6 +279,10 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         count_title="Ask Sample Count",
         probability_col=2,
         count_col=2,
+        show_probability_scale=False,
+        show_count_scale=False,
+        probability_colorbar_y=0.79,
+        count_colorbar_y=0.21,
     )
 
     for row in (1, 2):
@@ -254,11 +292,21 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
             if LOG_SPACED_BINS:
                 figure.update_xaxes(type="log", row=row, col=col)
                 figure.update_yaxes(type="log", row=row, col=col)
+            # Keep both axes on the same visual scale so each heatmap bin renders square.
+            figure.update_xaxes(constrain="domain", row=row, col=col)
+            figure.update_yaxes(
+                constrain="domain",
+                scaleanchor=f"x{'' if (row, col) == (1, 1) else (row - 1) * 2 + col}",
+                scaleratio=1,
+                row=row,
+                col=col,
+            )
 
     figure.update_layout(
         title="Fill Probability Simulation",
         template="plotly_white",
-        height=760,
-        margin={"l": 60, "r": 40, "t": 90, "b": 60},
+        autosize=True,
+        height=1500,
+        margin={"l": 36, "r": 68, "t": 72, "b": 36},
     )
     return figure
