@@ -186,15 +186,16 @@ class OrderbookDashboard:
         self.raw_dir = raw_dir
         self.preprocessed_dir = preprocessed_dir
         self.preprocessed_by_label: dict[str, PreprocessedDataset] = {}
+        self.preprocessed_datasets: list[PreprocessedDataset] = []
         self.raw_by_label = {}
+        self._updating_controls = False
         self.status = pn.pane.Alert(
             "Ready.", alert_type="light", sizing_mode="stretch_width"
         )
-        self.preprocessed_select = pn.widgets.MultiChoice(
-            name="Preprocessed datasets",
+        self.product_select = pn.widgets.Select(
+            name="Product",
             options=[],
             sizing_mode="stretch_width",
-            min_height=180,
         )
         self.raw_select = pn.widgets.MultiChoice(
             name="Raw batches pending preprocess",
@@ -202,11 +203,22 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
             min_height=180,
         )
-        self.plot_select = pn.widgets.MultiChoice(
-            name="Plots",
-            value=[],
-            options=list(PLOT_LABELS.values()),
+        self.plot_select = pn.widgets.Select(
+            name="Plot",
+            options=[],
             sizing_mode="stretch_width",
+        )
+        self.timestamp_select = pn.widgets.Select(
+            name="Timestamp",
+            options=[],
+            sizing_mode="stretch_width",
+        )
+        self.fill_group_select = pn.widgets.Select(
+            name="Simulation group",
+            options={},
+            sizing_mode="stretch_width",
+            visible=False,
+            disabled=True,
         )
         self.refresh_button = pn.widgets.Button(
             name="Refresh Catalog",
@@ -239,7 +251,7 @@ class OrderbookDashboard:
         )
         self.plot_area = pn.Column(
             pn.pane.Markdown(
-                "Select one or more preprocessed datasets to start plotting."
+                "Select a product, plot, and timestamp to start plotting."
             ),
             sizing_mode="stretch_both",
             min_width=720,
@@ -247,15 +259,18 @@ class OrderbookDashboard:
 
         self.refresh_button.on_click(self._handle_refresh)
         self.preprocess_button.on_click(self._handle_preprocess)
-        self.preprocessed_select.param.watch(self._handle_selection_change, "value")
+        self.product_select.param.watch(self._handle_product_change, "value")
         self.raw_select.param.watch(self._handle_raw_selection_change, "value")
-        self.plot_select.param.watch(self._handle_selection_change, "value")
+        self.plot_select.param.watch(self._handle_plot_change, "value")
+        self.timestamp_select.param.watch(self._handle_timestamp_change, "value")
+        self.fill_group_select.param.watch(self._handle_fill_group_change, "value")
 
         self.refresh_catalog()
 
     def refresh_catalog(self) -> None:
         datasets = discover_preprocessed_datasets(self.preprocessed_dir)
         batches = discover_raw_batches(self.raw_dir, self.preprocessed_dir)
+        self.preprocessed_datasets = datasets
         self.preprocessed_by_label = {
             dataset.display_name: dataset for dataset in datasets
         }
@@ -263,20 +278,29 @@ class OrderbookDashboard:
             batch.display_name: batch for batch in batches if not batch.is_preprocessed
         }
 
-        existing_preprocessed = [
-            label
-            for label in self.preprocessed_select.value
-            if label in self.preprocessed_by_label
-        ]
         existing_raw = [
             label for label in self.raw_select.value if label in self.raw_by_label
         ]
-
-        self.preprocessed_select.options = list(self.preprocessed_by_label.keys())
-        self.preprocessed_select.value = existing_preprocessed
-
         self.raw_select.options = list(self.raw_by_label.keys())
         self.raw_select.value = existing_raw
+
+        previous_product = self._selected_product()
+        product_options = self._available_products()
+        next_product = (
+            previous_product
+            if previous_product in product_options
+            else product_options[0] if product_options else None
+        )
+
+        self._updating_controls = True
+        try:
+            if self.product_select.options != product_options:
+                self.product_select.options = product_options
+            if self.product_select.value != next_product:
+                self.product_select.value = next_product
+            self._sync_plot_options(render=False)
+        finally:
+            self._updating_controls = False
 
         self._update_raw_summary()
         self._render_plots()
@@ -321,17 +345,14 @@ class OrderbookDashboard:
             return
 
         batch_count = len(selected_batches)
-        progress_messages = [
-            f"Queued {batch_count} raw batch(es) for preprocessing."
-        ]
+        progress_messages = [f"Queued {batch_count} raw batch(es) for preprocessing."]
         self.preprocess_progress.object = self._format_preprocess_progress(
             batch_count, progress_messages
         )
-        self._set_status(
-            f"Preprocessing {batch_count} raw batch(es)...", "primary"
-        )
+        self._set_status(f"Preprocessing {batch_count} raw batch(es)...", "primary")
         self._set_preprocess_loading(True)
         try:
+
             def update_progress(message: str) -> None:
                 progress_messages.append(message)
                 self.preprocess_progress.object = self._format_preprocess_progress(
@@ -345,16 +366,20 @@ class OrderbookDashboard:
                 progress_callback=update_progress,
             )
             self.refresh_catalog()
-            new_labels = sorted(
-                dataset.display_name
-                for dataset in preprocessed_datasets
-                if dataset.display_name in self.preprocessed_by_label
+            generated_paths = {dataset.path for dataset in preprocessed_datasets}
+            target_dataset = next(
+                (
+                    dataset
+                    for dataset in reversed(self.preprocessed_datasets)
+                    if dataset.path in generated_paths
+                ),
+                None,
             )
-            if new_labels:
-                self.preprocessed_select.value = new_labels
+            if target_dataset is not None:
+                self._select_preprocessed_dataset(target_dataset)
             summary = (
                 f"Completed preprocessing {batch_count} batch(es). "
-                f"Generated {len(new_labels)} preprocessed dataset(s)."
+                f"Generated {len(preprocessed_datasets)} preprocessed dataset(s)."
             )
             progress_messages.append(summary)
             self.preprocess_progress.object = self._format_preprocess_progress(
@@ -371,11 +396,176 @@ class OrderbookDashboard:
         finally:
             self._set_preprocess_loading(False)
 
-    def _handle_selection_change(self, _event) -> None:
+    def _select_preprocessed_dataset(self, dataset: PreprocessedDataset) -> None:
+        if dataset.product_id not in self.product_select.options:
+            return
+
+        preferred_plot_type = next(
+            (
+                view
+                for view in dataset.available_views
+                if view in PLOT_REGISTRY and view != "fill_probability"
+            ),
+            next(
+                (view for view in dataset.available_views if view in PLOT_REGISTRY),
+                None,
+            ),
+        )
+        preferred_plot_label = (
+            self._plot_label_for_type(preferred_plot_type)
+            if preferred_plot_type is not None
+            else None
+        )
+
+        self._updating_controls = True
+        try:
+            if self.product_select.value != dataset.product_id:
+                self.product_select.value = dataset.product_id
+        finally:
+            self._updating_controls = False
+
+        self._sync_plot_options(render=False)
+        if (
+            preferred_plot_label is not None
+            and preferred_plot_label in self.plot_select.options
+        ):
+            self._updating_controls = True
+            try:
+                if self.plot_select.value != preferred_plot_label:
+                    self.plot_select.value = preferred_plot_label
+            finally:
+                self._updating_controls = False
+            self._sync_timestamp_options(render=False)
+
+        dataset_key = self._dataset_selection_key(dataset)
+        if dataset_key in set(self.timestamp_select.options.values()):
+            self._updating_controls = True
+            try:
+                if self.timestamp_select.value != dataset_key:
+                    self.timestamp_select.value = dataset_key
+            finally:
+                self._updating_controls = False
+
+        self._render_plots()
+
+    def _handle_product_change(self, _event) -> None:
+        if self._updating_controls:
+            return
+        self._sync_plot_options(render=True)
+
+    def _handle_plot_change(self, _event) -> None:
+        if self._updating_controls:
+            return
+        self._sync_timestamp_options(render=True)
+
+    def _handle_timestamp_change(self, _event) -> None:
+        if self._updating_controls:
+            return
+        self._render_plots()
+
+    def _handle_fill_group_change(self, _event) -> None:
+        if self._updating_controls:
+            return
         self._render_plots()
 
     def _handle_raw_selection_change(self, _event) -> None:
         self._update_raw_summary()
+
+    def _sync_plot_options(self, *, render: bool) -> None:
+        product_id = self._selected_product()
+        previous_plot_type = self._selected_plot_type()
+        plot_options = self._available_plot_labels(product_id) if product_id else []
+        previous_plot_label = (
+            self._plot_label_for_type(previous_plot_type)
+            if previous_plot_type is not None
+            else None
+        )
+        next_plot_label = (
+            previous_plot_label
+            if previous_plot_label in plot_options
+            else plot_options[0] if plot_options else None
+        )
+
+        self._updating_controls = True
+        try:
+            if self.plot_select.options != plot_options:
+                self.plot_select.options = plot_options
+            if self.plot_select.value != next_plot_label:
+                self.plot_select.value = next_plot_label
+            self._sync_timestamp_options(render=False)
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
+
+    def _sync_timestamp_options(self, *, render: bool) -> None:
+        product_id = self._selected_product()
+        plot_type = self._selected_plot_type()
+        is_fill_probability = plot_type == "fill_probability"
+        timestamp_options = (
+            self._available_timestamp_options(product_id, plot_type)
+            if product_id and plot_type and not is_fill_probability
+            else {}
+        )
+        previous_timestamp = self.timestamp_select.value
+        timestamp_values = set(timestamp_options.values())
+        next_timestamp = (
+            previous_timestamp
+            if previous_timestamp in timestamp_values
+            else next(iter(timestamp_options.values()), None)
+        )
+
+        self._updating_controls = True
+        try:
+            if self.timestamp_select.visible == is_fill_probability:
+                self.timestamp_select.visible = not is_fill_probability
+            if self.timestamp_select.disabled != is_fill_probability:
+                self.timestamp_select.disabled = is_fill_probability
+            if self.timestamp_select.options != timestamp_options:
+                self.timestamp_select.options = timestamp_options
+            if self.timestamp_select.value != next_timestamp:
+                self.timestamp_select.value = next_timestamp
+            self._sync_fill_group_options(render=False)
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
+
+    def _sync_fill_group_options(self, *, render: bool) -> None:
+        product_id = self._selected_product()
+        plot_type = self._selected_plot_type()
+        is_fill_probability = plot_type == "fill_probability"
+        group_options = (
+            self._available_fill_group_options(product_id)
+            if product_id and is_fill_probability
+            else {}
+        )
+        previous_group = self.fill_group_select.value
+        group_values = set(group_options.values())
+        next_group = (
+            previous_group
+            if previous_group in group_values
+            else next(iter(group_options.values()), None)
+        )
+
+        self._updating_controls = True
+        try:
+            if self.fill_group_select.visible != is_fill_probability:
+                self.fill_group_select.visible = is_fill_probability
+            next_disabled = not is_fill_probability
+            if self.fill_group_select.disabled != next_disabled:
+                self.fill_group_select.disabled = next_disabled
+            if self.fill_group_select.options != group_options:
+                self.fill_group_select.options = group_options
+            if self.fill_group_select.value != next_group:
+                self.fill_group_select.value = next_group
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
 
     def _build_plot_pane(
         self, plot_type: str, locators: list[PlotDatasetLocator]
@@ -391,64 +581,283 @@ class OrderbookDashboard:
                 sizing_mode="stretch_both",
                 min_height=560,
             )
-        return pn.pane.HoloViews(
-            plot, sizing_mode="stretch_both", min_height=560
+        return pn.pane.HoloViews(plot, sizing_mode="stretch_both", min_height=560)
+
+    def _available_products(self) -> list[str]:
+        return sorted(
+            {
+                dataset.product_id
+                for dataset in self.preprocessed_datasets
+                if any(view in PLOT_REGISTRY for view in dataset.available_views)
+            }
         )
 
-    def _selected_datasets(self) -> list[PreprocessedDataset]:
+    def _selected_product(self) -> str | None:
+        value = self.product_select.value
+        return str(value) if value else None
+
+    def _selected_plot_type(self) -> str | None:
+        value = self.plot_select.value
+        if not value:
+            return None
+        try:
+            return self._plot_type_for_label(str(value))
+        except StopIteration:
+            return None
+
+    def _plot_label_for_type(self, plot_type: str) -> str:
+        return PLOT_LABELS.get(plot_type, plot_type)
+
+    def _plot_type_for_label(self, plot_label: str) -> str:
+        return next(key for key, value in PLOT_LABELS.items() if value == plot_label)
+
+    def _datasets_for_product(self, product_id: str) -> list[PreprocessedDataset]:
         return [
-            self.preprocessed_by_label[label]
-            for label in self.preprocessed_select.value
-            if label in self.preprocessed_by_label
+            dataset
+            for dataset in self.preprocessed_datasets
+            if dataset.product_id == product_id
         ]
 
-    def _selected_plot_labels(self) -> list[str]:
+    def _available_plot_labels(self, product_id: str) -> list[str]:
+        plot_types = {
+            view
+            for dataset in self._datasets_for_product(product_id)
+            for view in dataset.available_views
+            if view in PLOT_REGISTRY
+        }
         return [
-            label for label in self.plot_select.value if label in PLOT_LABELS.values()
+            self._plot_label_for_type(plot_type)
+            for plot_type in PLOT_REGISTRY
+            if plot_type in plot_types
         ]
 
-    def _update_dataset_summary(
-        self, selected_datasets: list[PreprocessedDataset]
-    ) -> None:
-        if not self.preprocessed_by_label:
+    def _dataset_selection_key(self, dataset: PreprocessedDataset) -> str:
+        return str(dataset.path)
+
+    def _timestamp_option_label(self, dataset: PreprocessedDataset) -> str:
+        formatted_timestamp = parse_timestamp(dataset.timestamp).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        return f"{formatted_timestamp} | {format_time_step(dataset.time_step)}s"
+
+    def _available_timestamp_options(
+        self, product_id: str, plot_type: str
+    ) -> dict[str, str]:
+        datasets_by_key: dict[str, PreprocessedDataset] = {}
+        for dataset in self._datasets_for_product(product_id):
+            if plot_type not in dataset.available_views:
+                continue
+            datasets_by_key.setdefault(self._dataset_selection_key(dataset), dataset)
+
+        label_counts: dict[str, int] = {}
+        options: dict[str, str] = {}
+        for dataset in sorted(
+            datasets_by_key.values(),
+            key=lambda item: (item.timestamp, item.time_step, item.path.name),
+        ):
+            base_label = self._timestamp_option_label(dataset)
+            label_counts[base_label] = label_counts.get(base_label, 0) + 1
+            label = base_label
+            if label_counts[base_label] > 1:
+                label = f"{base_label} | {dataset.path.name}"
+            options[label] = self._dataset_selection_key(dataset)
+        return options
+
+    def _fill_probability_group_value(
+        self, group_key: tuple[str, float, str | None, str]
+    ) -> str:
+        product_id, time_step, time_step_token, signature = group_key
+        token = time_step_token or format_time_step(time_step)
+        return "|".join((product_id, token, signature))
+
+    def _fill_probability_group_label(
+        self,
+        group_key: tuple[str, float, str | None, str],
+        group: list[PreprocessedDataset],
+    ) -> str:
+        _product_id, time_step, time_step_token, signature = group_key
+        token = time_step_token or format_time_step(time_step)
+        timestamp_count = len({dataset.timestamp for dataset in group})
+        simulation_count = len(
+            {
+                dataset.simulation_path
+                for dataset in group
+                if dataset.simulation_path is not None
+            }
+        )
+        return (
+            f"{format_time_step(time_step)}s ({token}) | {signature} | "
+            f"{timestamp_count} timestamp(s), {simulation_count} simulation file(s)"
+        )
+
+    def _available_fill_group_options(self, product_id: str) -> dict[str, str]:
+        fill_datasets = [
+            dataset
+            for dataset in self._datasets_for_product(product_id)
+            if "fill_probability" in dataset.available_views
+            and dataset.simulation_path is not None
+        ]
+        groups = self._fill_probability_groups(fill_datasets)
+        return {
+            self._fill_probability_group_label(
+                group_key, group
+            ): self._fill_probability_group_value(group_key)
+            for group_key, group in sorted(groups.items())
+        }
+
+    def _simulation_parameter_signature(self, dataset: PreprocessedDataset) -> str:
+        if dataset.simulation_path is None:
+            return "simulation-parameters-unrecognized"
+        file_name = dataset.simulation_path.name
+        if dataset.timestamp not in file_name:
+            return "simulation-parameters-unrecognized"
+        signature = file_name.replace(dataset.timestamp, "")
+        return signature.strip("-_. ") or "simulation-parameters-unrecognized"
+
+    def _fill_probability_group_key(
+        self, dataset: PreprocessedDataset
+    ) -> tuple[str, float, str | None, str]:
+        return (
+            dataset.product_id,
+            dataset.time_step,
+            dataset.time_step_token,
+            self._simulation_parameter_signature(dataset),
+        )
+
+    def _fill_probability_groups(
+        self, datasets: list[PreprocessedDataset]
+    ) -> dict[tuple[str, float, str | None, str], list[PreprocessedDataset]]:
+        groups: dict[tuple[str, float, str | None, str], list[PreprocessedDataset]] = {}
+        for dataset in datasets:
+            groups.setdefault(self._fill_probability_group_key(dataset), []).append(
+                dataset
+            )
+        return {
+            key: sorted(group, key=lambda dataset: dataset.timestamp)
+            for key, group in groups.items()
+        }
+
+    def _selected_datasets_for_plot(self) -> list[PreprocessedDataset]:
+        product_id = self._selected_product()
+        plot_type = self._selected_plot_type()
+        if product_id is None or plot_type is None:
+            return []
+
+        product_datasets = self._datasets_for_product(product_id)
+        if plot_type == "fill_probability":
+            selected_group = self.fill_group_select.value
+            if not selected_group:
+                return []
+            selected_datasets = [
+                dataset
+                for dataset in product_datasets
+                if plot_type in dataset.available_views
+                and dataset.simulation_path is not None
+                and self._fill_probability_group_value(
+                    self._fill_probability_group_key(dataset)
+                )
+                == selected_group
+            ]
+            return sorted(selected_datasets, key=lambda dataset: dataset.timestamp)
+
+        selected_dataset_key = self.timestamp_select.value
+        if not selected_dataset_key:
+            return []
+
+        matching_datasets = [
+            dataset
+            for dataset in product_datasets
+            if self._dataset_selection_key(dataset) == selected_dataset_key
+            and plot_type in dataset.available_views
+        ]
+        non_simulation_datasets = [
+            dataset for dataset in matching_datasets if dataset.simulation_path is None
+        ]
+        if non_simulation_datasets:
+            return [non_simulation_datasets[0]]
+        return matching_datasets[:1]
+
+    def _update_dataset_summary(self) -> None:
+        if not self.preprocessed_datasets:
             self.dataset_summary.object = (
-                "**Selected dataset count:** 0\n\n"
+                "**Current product:** None\n\n"
                 "No preprocessed datasets were found. Run preprocessing on a raw "
                 "batch or refresh the catalog after adding `.npz` files."
             )
             return
 
-        if not selected_datasets:
+        product_id = self._selected_product()
+        plot_type = self._selected_plot_type()
+        plot_label = self._plot_label_for_type(plot_type) if plot_type else "None"
+        if product_id is None:
             self.dataset_summary.object = (
-                "**Selected dataset count:** 0\n\n"
-                "Choose one or more preprocessed datasets to see product, time, "
-                "step, and view details."
+                "**Current product:** None\n\n"
+                "No product with plottable preprocessed data is available."
             )
             return
 
-        product_ids = sorted({dataset.product_id for dataset in selected_datasets})
-        timestamps = sorted(dataset.timestamp for dataset in selected_datasets)
-        time_steps = sorted(
-            {format_time_step(dataset.time_step) for dataset in selected_datasets}
+        product_datasets = self._datasets_for_product(product_id)
+        available_views = [
+            self._plot_label_for_type(plot_type)
+            for plot_type in PLOT_REGISTRY
+            if any(plot_type in dataset.available_views for dataset in product_datasets)
+        ]
+        selected_datasets = self._selected_datasets_for_plot()
+
+        if plot_type == "fill_probability":
+            groups = self._fill_probability_groups(selected_datasets)
+            group_lines = []
+            for (
+                _product,
+                time_step,
+                time_step_token,
+                signature,
+            ), group in groups.items():
+                timestamp_count = len({dataset.timestamp for dataset in group})
+                simulation_count = len(
+                    {
+                        dataset.simulation_path
+                        for dataset in group
+                        if dataset.simulation_path is not None
+                    }
+                )
+                group_lines.append(
+                    f"- `{format_time_step(time_step)}s` "
+                    f"(`{time_step_token or format_time_step(time_step)}`) / "
+                    f"`{signature}`: {timestamp_count} timestamp(s), "
+                    f"{simulation_count} simulation file(s)"
+                )
+            group_summary = "\n".join(group_lines) or "- None"
+            self.dataset_summary.object = (
+                f"**Current product:** {product_id}\n\n"
+                f"**Current plot:** {plot_label}\n\n"
+                f"**Merged timestamp count:** "
+                f"{len({dataset.timestamp for dataset in selected_datasets})}\n\n"
+                f"**Simulation file count:** "
+                f"{len({dataset.simulation_path for dataset in selected_datasets if dataset.simulation_path is not None})}\n\n"
+                f"**Time step / parameter groups**\n{group_summary}\n\n"
+                f"**Available views:** {', '.join(available_views) or 'None'}"
+            )
+            return
+
+        selected_dataset = selected_datasets[0] if selected_datasets else None
+        formatted_timestamp = (
+            parse_timestamp(selected_dataset.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            if selected_dataset is not None
+            else "None"
         )
-        available_views = sorted(
-            {
-                PLOT_LABELS.get(view, view)
-                for dataset in selected_datasets
-                for view in dataset.available_views
-            }
-        )
-        timestamp_range = self._format_timestamp_range(timestamps)
-        dataset_lines = "\n".join(
-            f"- `{dataset.display_name}`" for dataset in selected_datasets
+        selected_time_step = (
+            f"{format_time_step(selected_dataset.time_step)}s"
+            if selected_dataset is not None
+            else "None"
         )
         self.dataset_summary.object = (
-            f"**Selected dataset count:** {len(selected_datasets)}\n\n"
-            f"**Product id:** {', '.join(product_ids)}\n\n"
-            f"**Timestamp range:** {timestamp_range}\n\n"
-            f"**Time step:** {', '.join(f'{step}s' for step in time_steps)}\n\n"
-            f"**Available views:** {', '.join(available_views) or 'None'}\n\n"
-            f"**Datasets**\n{dataset_lines}"
+            f"**Current product:** {product_id}\n\n"
+            f"**Current plot:** {plot_label}\n\n"
+            f"**Selected timestamp:** {formatted_timestamp}\n\n"
+            f"**Selected time step:** {selected_time_step}\n\n"
+            f"**Matching dataset count:** {len(selected_datasets)}\n\n"
+            f"**Available views:** {', '.join(available_views) or 'None'}"
         )
 
     def _update_raw_summary(self) -> None:
@@ -576,104 +985,83 @@ class OrderbookDashboard:
             plot_label, selected_dataset_count, result_placeholder, error=error
         )
 
-    def _plot_selection_empty_state(
-        self,
-        selected_datasets: list[PreprocessedDataset],
-        selected_plot_labels: list[str],
-    ) -> pn.pane.Alert | None:
-        if not self.preprocessed_by_label:
+    def _plot_selection_empty_state(self) -> pn.pane.Alert | None:
+        if not self.preprocessed_datasets:
             return self._empty_state(
                 "No preprocessed datasets were found. Preprocess a raw batch or "
                 "refresh the catalog after adding `.npz` files.",
                 "warning",
             )
 
-        if not selected_datasets:
+        product_id = self._selected_product()
+        if product_id is None:
             return self._empty_state(
-                "Select one or more preprocessed datasets to start plotting.",
+                "No product has plottable preprocessed data. Refresh the catalog "
+                "after adding datasets with available views.",
                 "info",
             )
 
-        if not selected_plot_labels:
-            return self._empty_state("Select at least one plot type.", "warning")
-
-        product_ids = sorted({dataset.product_id for dataset in selected_datasets})
-        if len(product_ids) != 1:
+        plot_type = self._selected_plot_type()
+        if plot_type is None:
             return self._empty_state(
-                "Datasets must share a single product before plotting. "
-                f"Selected products: {', '.join(product_ids)}. "
-                "Deselect datasets until only one product remains.",
+                f"Selected product `{product_id}` does not have any available plots.",
+                "warning",
+            )
+
+        if plot_type == "fill_probability":
+            if not self._selected_datasets_for_plot():
+                return self._empty_state(
+                    "Fill Probability cannot be rendered because no mergeable "
+                    f"simulation datasets were found for `{product_id}`.",
+                    "warning",
+                )
+            return None
+
+        if not self.timestamp_select.value:
+            return self._empty_state(
+                f"Selected plot `{self._plot_label_for_type(plot_type)}` does not "
+                f"have any plottable timestamps for `{product_id}`.",
+                "warning",
+            )
+
+        if not self._selected_datasets_for_plot():
+            return self._empty_state(
+                "No dataset matches the selected product, plot, and timestamp.",
                 "warning",
             )
 
         return None
 
-    def _plot_type_for_label(self, plot_label: str) -> str:
-        return next(key for key, value in PLOT_LABELS.items() if value == plot_label)
-
     def _render_plots(self) -> None:
-        selected_datasets = self._selected_datasets()
-        selected_plot_labels = self._selected_plot_labels()
-        self._update_dataset_summary(selected_datasets)
+        self._update_dataset_summary()
 
-        empty_state = self._plot_selection_empty_state(
-            selected_datasets, selected_plot_labels
-        )
+        empty_state = self._plot_selection_empty_state()
         if empty_state is not None:
             self.plot_area.objects = [empty_state]
             return
 
+        plot_type = self._selected_plot_type()
+        if plot_type is None:
+            self.plot_area.objects = [
+                self._empty_state("Select a plot type before rendering.", "warning")
+            ]
+            return
+        plot_label = self._plot_label_for_type(plot_type)
+        selected_datasets = self._selected_datasets_for_plot()
         locators: list[PlotDatasetLocator] = [
             dataset.to_locator(self.preprocessed_dir) for dataset in selected_datasets
         ]
-        plot_cards: list[pn.Card] = []
         selected_dataset_count = len(selected_datasets)
 
-        for plot_label in selected_plot_labels:
-            plot_type = self._plot_type_for_label(plot_label)
-            if any(
-                plot_type not in dataset.available_views
-                for dataset in selected_datasets
-            ):
-                plot_cards.append(
-                    self._unsupported_plot_card(
-                        plot_label, plot_type, selected_datasets
-                    )
-                )
-                continue
-
-            try:
-                result_pane = self._build_plot_pane(plot_type, locators)
-                plot_cards.append(
-                    self._plot_card(
-                        plot_label, selected_dataset_count, result_pane
-                    )
-                )
-            except Exception as error:
-                plot_cards.append(
-                    self._render_error_card(
-                        plot_label, selected_dataset_count, error
-                    )
-                )
-
-        if not plot_cards:
+        try:
+            result_pane = self._build_plot_pane(plot_type, locators)
             self.plot_area.objects = [
-                self._empty_state("No plots are available for the current selection.")
+                self._plot_card(plot_label, selected_dataset_count, result_pane)
             ]
-            return
-
-        if len(plot_cards) == 1:
-            self.plot_area.objects = plot_cards
-            return
-
-        self.plot_area.objects = [
-            pn.Tabs(
-                *[(card.title, card) for card in plot_cards],
-                sizing_mode="stretch_both",
-                dynamic=True,
-                css_classes=["qf-plot-tabs"],
-            )
-        ]
+        except Exception as error:
+            self.plot_area.objects = [
+                self._render_error_card(plot_label, selected_dataset_count, error)
+            ]
 
     def _card(
         self,
@@ -738,7 +1126,7 @@ class OrderbookDashboard:
 
     def build_dataset_section(self) -> pn.Card:
         return self._card(
-            self.preprocessed_select,
+            self.product_select,
             self.dataset_summary,
             title="Dataset selection",
         )
@@ -771,8 +1159,15 @@ class OrderbookDashboard:
         )
 
     def build_plot_section(self) -> pn.Column:
+        is_fill_probability = self._selected_plot_type() == "fill_probability"
+        self.timestamp_select.visible = not is_fill_probability
+        self.timestamp_select.disabled = is_fill_probability
+        self.fill_group_select.visible = is_fill_probability
+        self.fill_group_select.disabled = not is_fill_probability
         plot_controls = self._card(
             self.plot_select,
+            self.timestamp_select,
+            self.fill_group_select,
             title="Plot controls",
             css_classes=["qf-plot-controls"],
         )
