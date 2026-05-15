@@ -213,6 +213,13 @@ class OrderbookDashboard:
             options=[],
             sizing_mode="stretch_width",
         )
+        self.fill_group_select = pn.widgets.Select(
+            name="Simulation group",
+            options={},
+            sizing_mode="stretch_width",
+            visible=False,
+            disabled=True,
+        )
         self.refresh_button = pn.widgets.Button(
             name="Refresh Catalog",
             button_type="default",
@@ -256,6 +263,7 @@ class OrderbookDashboard:
         self.raw_select.param.watch(self._handle_raw_selection_change, "value")
         self.plot_select.param.watch(self._handle_plot_change, "value")
         self.timestamp_select.param.watch(self._handle_timestamp_change, "value")
+        self.fill_group_select.param.watch(self._handle_fill_group_change, "value")
 
         self.refresh_catalog()
 
@@ -358,15 +366,17 @@ class OrderbookDashboard:
                 progress_callback=update_progress,
             )
             self.refresh_catalog()
-            new_product_ids = sorted(
-                {
-                    dataset.product_id
-                    for dataset in preprocessed_datasets
-                    if dataset.display_name in self.preprocessed_by_label
-                }
+            generated_paths = {dataset.path for dataset in preprocessed_datasets}
+            target_dataset = next(
+                (
+                    dataset
+                    for dataset in reversed(self.preprocessed_datasets)
+                    if dataset.path in generated_paths
+                ),
+                None,
             )
-            if new_product_ids and new_product_ids[0] in self.product_select.options:
-                self.product_select.value = new_product_ids[0]
+            if target_dataset is not None:
+                self._select_preprocessed_dataset(target_dataset)
             summary = (
                 f"Completed preprocessing {batch_count} batch(es). "
                 f"Generated {len(preprocessed_datasets)} preprocessed dataset(s)."
@@ -386,6 +396,58 @@ class OrderbookDashboard:
         finally:
             self._set_preprocess_loading(False)
 
+    def _select_preprocessed_dataset(self, dataset: PreprocessedDataset) -> None:
+        if dataset.product_id not in self.product_select.options:
+            return
+
+        preferred_plot_type = next(
+            (
+                view
+                for view in dataset.available_views
+                if view in PLOT_REGISTRY and view != "fill_probability"
+            ),
+            next(
+                (view for view in dataset.available_views if view in PLOT_REGISTRY),
+                None,
+            ),
+        )
+        preferred_plot_label = (
+            self._plot_label_for_type(preferred_plot_type)
+            if preferred_plot_type is not None
+            else None
+        )
+
+        self._updating_controls = True
+        try:
+            if self.product_select.value != dataset.product_id:
+                self.product_select.value = dataset.product_id
+        finally:
+            self._updating_controls = False
+
+        self._sync_plot_options(render=False)
+        if (
+            preferred_plot_label is not None
+            and preferred_plot_label in self.plot_select.options
+        ):
+            self._updating_controls = True
+            try:
+                if self.plot_select.value != preferred_plot_label:
+                    self.plot_select.value = preferred_plot_label
+            finally:
+                self._updating_controls = False
+            self._sync_timestamp_options(render=False)
+
+        dataset_key = self._dataset_selection_key(dataset)
+        if dataset_key in set(self.timestamp_select.options.values()):
+            self._updating_controls = True
+            try:
+                if self.timestamp_select.value != dataset_key:
+                    self.timestamp_select.value = dataset_key
+            finally:
+                self._updating_controls = False
+
+        self._render_plots()
+
     def _handle_product_change(self, _event) -> None:
         if self._updating_controls:
             return
@@ -397,6 +459,11 @@ class OrderbookDashboard:
         self._sync_timestamp_options(render=True)
 
     def _handle_timestamp_change(self, _event) -> None:
+        if self._updating_controls:
+            return
+        self._render_plots()
+
+    def _handle_fill_group_change(self, _event) -> None:
         if self._updating_controls:
             return
         self._render_plots()
@@ -459,6 +526,41 @@ class OrderbookDashboard:
                 self.timestamp_select.options = timestamp_options
             if self.timestamp_select.value != next_timestamp:
                 self.timestamp_select.value = next_timestamp
+            self._sync_fill_group_options(render=False)
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
+
+    def _sync_fill_group_options(self, *, render: bool) -> None:
+        product_id = self._selected_product()
+        plot_type = self._selected_plot_type()
+        is_fill_probability = plot_type == "fill_probability"
+        group_options = (
+            self._available_fill_group_options(product_id)
+            if product_id and is_fill_probability
+            else {}
+        )
+        previous_group = self.fill_group_select.value
+        group_values = set(group_options.values())
+        next_group = (
+            previous_group
+            if previous_group in group_values
+            else next(iter(group_options.values()), None)
+        )
+
+        self._updating_controls = True
+        try:
+            if self.fill_group_select.visible != is_fill_probability:
+                self.fill_group_select.visible = is_fill_probability
+            next_disabled = not is_fill_probability
+            if self.fill_group_select.disabled != next_disabled:
+                self.fill_group_select.disabled = next_disabled
+            if self.fill_group_select.options != group_options:
+                self.fill_group_select.options = group_options
+            if self.fill_group_select.value != next_group:
+                self.fill_group_select.value = next_group
         finally:
             self._updating_controls = False
 
@@ -529,19 +631,78 @@ class OrderbookDashboard:
             if plot_type in plot_types
         ]
 
+    def _dataset_selection_key(self, dataset: PreprocessedDataset) -> str:
+        return str(dataset.path)
+
+    def _timestamp_option_label(self, dataset: PreprocessedDataset) -> str:
+        formatted_timestamp = parse_timestamp(dataset.timestamp).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        return f"{formatted_timestamp} | {format_time_step(dataset.time_step)}s"
+
     def _available_timestamp_options(
         self, product_id: str, plot_type: str
     ) -> dict[str, str]:
-        timestamps = sorted(
+        datasets_by_key: dict[str, PreprocessedDataset] = {}
+        for dataset in self._datasets_for_product(product_id):
+            if plot_type not in dataset.available_views:
+                continue
+            datasets_by_key.setdefault(self._dataset_selection_key(dataset), dataset)
+
+        label_counts: dict[str, int] = {}
+        options: dict[str, str] = {}
+        for dataset in sorted(
+            datasets_by_key.values(),
+            key=lambda item: (item.timestamp, item.time_step, item.path.name),
+        ):
+            base_label = self._timestamp_option_label(dataset)
+            label_counts[base_label] = label_counts.get(base_label, 0) + 1
+            label = base_label
+            if label_counts[base_label] > 1:
+                label = f"{base_label} | {dataset.path.name}"
+            options[label] = self._dataset_selection_key(dataset)
+        return options
+
+    def _fill_probability_group_value(
+        self, group_key: tuple[str, float, str | None, str]
+    ) -> str:
+        product_id, time_step, time_step_token, signature = group_key
+        token = time_step_token or format_time_step(time_step)
+        return "|".join((product_id, token, signature))
+
+    def _fill_probability_group_label(
+        self,
+        group_key: tuple[str, float, str | None, str],
+        group: list[PreprocessedDataset],
+    ) -> str:
+        _product_id, time_step, time_step_token, signature = group_key
+        token = time_step_token or format_time_step(time_step)
+        timestamp_count = len({dataset.timestamp for dataset in group})
+        simulation_count = len(
             {
-                dataset.timestamp
-                for dataset in self._datasets_for_product(product_id)
-                if plot_type in dataset.available_views
+                dataset.simulation_path
+                for dataset in group
+                if dataset.simulation_path is not None
             }
         )
+        return (
+            f"{format_time_step(time_step)}s ({token}) | {signature} | "
+            f"{timestamp_count} timestamp(s), {simulation_count} simulation file(s)"
+        )
+
+    def _available_fill_group_options(self, product_id: str) -> dict[str, str]:
+        fill_datasets = [
+            dataset
+            for dataset in self._datasets_for_product(product_id)
+            if "fill_probability" in dataset.available_views
+            and dataset.simulation_path is not None
+        ]
+        groups = self._fill_probability_groups(fill_datasets)
         return {
-            parse_timestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"): timestamp
-            for timestamp in timestamps
+            self._fill_probability_group_label(
+                group_key, group
+            ): self._fill_probability_group_value(group_key)
+            for group_key, group in sorted(groups.items())
         }
 
     def _simulation_parameter_signature(self, dataset: PreprocessedDataset) -> str:
@@ -584,26 +745,37 @@ class OrderbookDashboard:
 
         product_datasets = self._datasets_for_product(product_id)
         if plot_type == "fill_probability":
-            return [
+            selected_group = self.fill_group_select.value
+            if not selected_group:
+                return []
+            selected_datasets = [
                 dataset
                 for dataset in product_datasets
                 if plot_type in dataset.available_views
                 and dataset.simulation_path is not None
+                and self._fill_probability_group_value(
+                    self._fill_probability_group_key(dataset)
+                )
+                == selected_group
             ]
+            return sorted(selected_datasets, key=lambda dataset: dataset.timestamp)
 
-        timestamp = self.timestamp_select.value
-        if not timestamp:
+        selected_dataset_key = self.timestamp_select.value
+        if not selected_dataset_key:
             return []
 
         matching_datasets = [
             dataset
             for dataset in product_datasets
-            if dataset.timestamp == timestamp and plot_type in dataset.available_views
+            if self._dataset_selection_key(dataset) == selected_dataset_key
+            and plot_type in dataset.available_views
         ]
         non_simulation_datasets = [
             dataset for dataset in matching_datasets if dataset.simulation_path is None
         ]
-        return non_simulation_datasets or matching_datasets
+        if non_simulation_datasets:
+            return [non_simulation_datasets[0]]
+        return matching_datasets[:1]
 
     def _update_dataset_summary(self) -> None:
         if not self.preprocessed_datasets:
@@ -668,16 +840,22 @@ class OrderbookDashboard:
             )
             return
 
-        selected_timestamp = self.timestamp_select.value
+        selected_dataset = selected_datasets[0] if selected_datasets else None
         formatted_timestamp = (
-            parse_timestamp(selected_timestamp).strftime("%Y-%m-%d %H:%M:%S")
-            if selected_timestamp
+            parse_timestamp(selected_dataset.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            if selected_dataset is not None
+            else "None"
+        )
+        selected_time_step = (
+            f"{format_time_step(selected_dataset.time_step)}s"
+            if selected_dataset is not None
             else "None"
         )
         self.dataset_summary.object = (
             f"**Current product:** {product_id}\n\n"
             f"**Current plot:** {plot_label}\n\n"
             f"**Selected timestamp:** {formatted_timestamp}\n\n"
+            f"**Selected time step:** {selected_time_step}\n\n"
             f"**Matching dataset count:** {len(selected_datasets)}\n\n"
             f"**Available views:** {', '.join(available_views) or 'None'}"
         )
@@ -870,11 +1048,6 @@ class OrderbookDashboard:
             return
         plot_label = self._plot_label_for_type(plot_type)
         selected_datasets = self._selected_datasets_for_plot()
-        if plot_type == "fill_probability":
-            groups = self._fill_probability_groups(selected_datasets)
-            selected_datasets = [
-                dataset for group in groups.values() for dataset in group
-            ]
         locators: list[PlotDatasetLocator] = [
             dataset.to_locator(self.preprocessed_dir) for dataset in selected_datasets
         ]
@@ -986,13 +1159,15 @@ class OrderbookDashboard:
         )
 
     def build_plot_section(self) -> pn.Column:
-        self.timestamp_select.visible = self._selected_plot_type() != "fill_probability"
-        self.timestamp_select.disabled = (
-            self._selected_plot_type() == "fill_probability"
-        )
+        is_fill_probability = self._selected_plot_type() == "fill_probability"
+        self.timestamp_select.visible = not is_fill_probability
+        self.timestamp_select.disabled = is_fill_probability
+        self.fill_group_select.visible = is_fill_probability
+        self.fill_group_select.disabled = not is_fill_probability
         plot_controls = self._card(
             self.plot_select,
             self.timestamp_select,
+            self.fill_group_select,
             title="Plot controls",
             css_classes=["qf-plot-controls"],
         )
