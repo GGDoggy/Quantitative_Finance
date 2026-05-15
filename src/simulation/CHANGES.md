@@ -20,3 +20,7 @@ order_fill_time + resolved_time
 
 Filled orders include evolved mid/micro prices and mid/micro profit metrics when a complete quote is available at or before the target time.
 Unfilled, canceled, unresolved, incomplete-quote, or out-of-range records are emitted as `np.nan` for these new fields.
+
+### Saved output identity
+
+Saved simulation `.npz` filenames and metadata now include `resolved_time` so runs with different evolved-quote horizons do not overwrite or mask one another.

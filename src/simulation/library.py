@@ -108,18 +108,35 @@ def parse_dataset_groups(data_v3_path):
     return sorted(available, key=lambda item: (item["product_id"], item["timestamp"]))
 
 
-def build_output_path(output_path, product_id, timestamp, time_step, algorithm_name):
-    filename = f"{product_id}-{timestamp}-{time_step}-simulation-{algorithm_name}.npz"
+def build_output_path(
+    output_path,
+    product_id,
+    timestamp,
+    time_step,
+    algorithm_name,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+):
+    filename = (
+        f"{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}"
+        f"-simulation-{algorithm_name}.npz"
+    )
     return Path(output_path) / filename
 
 
-def is_processed(dataset, output_path, time_step, algorithm_name):
+def is_processed(
+    dataset,
+    output_path,
+    time_step,
+    algorithm_name,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+):
     return build_output_path(
         output_path,
         dataset["product_id"],
         dataset["timestamp"],
         time_step,
         algorithm_name,
+        resolved_time,
     ).exists()
 
 
@@ -145,13 +162,22 @@ def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolv
     )
 
 
-def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result):
+def save_simulation_npz(
+    dataset,
+    output_path,
+    algorithm_name,
+    time_step,
+    base_tick,
+    result,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+):
     output_file = build_output_path(
         output_path,
         dataset["product_id"],
         dataset["timestamp"],
         time_step,
         algorithm_name,
+        resolved_time,
     )
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -161,19 +187,28 @@ def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_ti
         "file_stem": dataset["file_stem"],
         "time_step": time_step,
         "base_tick": base_tick,
+        "resolved_time": resolved_time,
     }
     save_kwargs.update(zip(SIMULATION_RESULT_KEYS, result))
     np.savez_compressed(output_file, **save_kwargs)
     return output_file
 
 
-def format_dataset_line(index, dataset, output_path, time_step, algorithm_name):
+def format_dataset_line(
+    index,
+    dataset,
+    output_path,
+    time_step,
+    algorithm_name,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+):
     output_file = build_output_path(
         output_path,
         dataset["product_id"],
         dataset["timestamp"],
         time_step,
         algorithm_name,
+        resolved_time,
     )
     return f"[{index}] {dataset['file_stem']} -> {output_file.name}"
 
@@ -205,8 +240,21 @@ def get_default_worker_count(task_count):
     return max(1, min(task_count, detected))
 
 
-def process_dataset_job(dataset, output_path, algorithm_name, time_step, base_tick):
-    result = run_dataset_simulation(dataset, algorithm_name, time_step, base_tick)
+def process_dataset_job(
+    dataset,
+    output_path,
+    algorithm_name,
+    time_step,
+    base_tick,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+):
+    result = run_dataset_simulation(
+        dataset,
+        algorithm_name,
+        time_step,
+        base_tick,
+        resolved_time,
+    )
     output_file = save_simulation_npz(
         dataset,
         output_path,
@@ -214,6 +262,7 @@ def process_dataset_job(dataset, output_path, algorithm_name, time_step, base_ti
         time_step,
         base_tick,
         result,
+        resolved_time,
     )
     return {
         "file_stem": dataset["file_stem"],
@@ -222,7 +271,14 @@ def process_dataset_job(dataset, output_path, algorithm_name, time_step, base_ti
     }
 
 
-def run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick):
+def run_datasets_in_parallel(
+    selected,
+    output_path,
+    algorithm_name,
+    time_step,
+    base_tick,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+):
     worker_count = get_default_worker_count(len(selected))
     failures = []
     with ProcessPoolExecutor(max_workers=worker_count) as executor:
@@ -234,6 +290,7 @@ def run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, b
                 algorithm_name,
                 time_step,
                 base_tick,
+                resolved_time,
             ): dataset
             for dataset in selected
         }

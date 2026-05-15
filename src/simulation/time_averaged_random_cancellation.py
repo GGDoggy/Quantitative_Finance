@@ -614,12 +614,11 @@ def compute_quote_prices(best_bid_price, best_bid_size, best_ask_price, best_ask
     return float(mid_price), float(micro_price)
 
 
-def get_evolved_prices(order, quote_timeline, resolved_time):
+def get_evolved_prices(order, quote_timeline, event_times, resolved_time):
     if order.result != 1 or not np.isfinite(order.fill_time) or not quote_timeline:
         return np.nan, np.nan
 
     target_time = order.fill_time + resolved_time
-    event_times = [quote[0] for quote in quote_timeline]
     quote_position = bisect_right(event_times, target_time) - 1
     if quote_position < 0:
         return np.nan, np.nan
@@ -636,18 +635,27 @@ def get_evolved_prices(order, quote_timeline, resolved_time):
     return compute_quote_prices(best_bid_price, best_bid_size, best_ask_price, best_ask_size)
 
 
-def compute_evolved_metrics(orders, quote_timeline, resolved_time):
+def compute_evolved_metrics(orders, quote_timeline, resolved_time, order_side):
     mid_prices = []
     micro_prices = []
     mid_profits = []
     micro_profits = []
+    event_times = [quote[0] for quote in quote_timeline]
+    profit_multiplier = -1.0 if order_side == "ask" else 1.0
 
     for order in orders:
-        mid_price, micro_price = get_evolved_prices(order, quote_timeline, resolved_time)
+        mid_price, micro_price = get_evolved_prices(
+            order,
+            quote_timeline,
+            event_times,
+            resolved_time,
+        )
         mid_prices.append(mid_price)
         micro_prices.append(micro_price)
-        mid_profits.append(mid_price - order.price if np.isfinite(mid_price) else np.nan)
-        micro_profits.append(micro_price - order.price if np.isfinite(micro_price) else np.nan)
+        mid_profit = profit_multiplier * (mid_price - order.price) if np.isfinite(mid_price) else np.nan
+        micro_profit = profit_multiplier * (micro_price - order.price) if np.isfinite(micro_price) else np.nan
+        mid_profits.append(mid_profit)
+        micro_profits.append(micro_profit)
 
     return (
         np.array(mid_prices, dtype=float),
@@ -657,7 +665,63 @@ def compute_evolved_metrics(orders, quote_timeline, resolved_time):
     )
 
 
-def finalize_unresolved(orders, quote_timeline=None, resolved_time=DEFAULT_RESOLVED_TIME):
+def append_quote_timeline_updates(
+    quote_timeline,
+    events,
+    event_index,
+    orderbook,
+    price_levels,
+    best_bid_index,
+    best_ask_index,
+    end_time,
+):
+    while event_index < len(events) and events[event_index][0] <= end_time:
+        (
+            event_time,
+            _priority,
+            event_type,
+            event_price,
+            event_volume,
+            event_side,
+        ) = events[event_index]
+        event_index += 1
+
+        if event_type == "trade":
+            continue
+
+        updated_index, _updated_value = update_orderbook(
+            orderbook,
+            price_levels,
+            event_price,
+            event_volume,
+            event_side,
+        )
+        best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
+        best_ask_index = advance_best_ask_index(orderbook, updated_index, best_ask_index)
+        current_bid_price, current_bid_size, current_ask_price, current_ask_size = get_best_levels_from_indices(
+            orderbook,
+            price_levels,
+            best_bid_index,
+            best_ask_index,
+        )
+        record_best_quote(
+            quote_timeline,
+            event_time,
+            current_bid_price,
+            current_bid_size,
+            current_ask_price,
+            current_ask_size,
+        )
+
+    return event_index, best_bid_index, best_ask_index
+
+
+def finalize_unresolved(
+    orders,
+    quote_timeline=None,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+    order_side="bid",
+):
     if quote_timeline is None:
         quote_timeline = []
 
@@ -680,7 +744,7 @@ def finalize_unresolved(orders, quote_timeline=None, resolved_time=DEFAULT_RESOL
         vorder_ratio,
         result,
         spread,
-        *compute_evolved_metrics(orders, quote_timeline, resolved_time),
+        *compute_evolved_metrics(orders, quote_timeline, resolved_time, order_side),
     )
 
 
@@ -828,7 +892,13 @@ def simulate_virtual_best_orders(
             previous_bid_index = best_bid_index
             previous_ask_index = best_ask_index
 
-            updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
+            updated_index, _updated_value = update_orderbook(
+            orderbook,
+            price_levels,
+            event_price,
+            event_volume,
+            event_side,
+        )
             best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
             best_ask_index = advance_best_ask_index(orderbook, updated_index, best_ask_index)
 
@@ -952,8 +1022,19 @@ def simulate_virtual_best_orders(
             order.ahead = max(order.ahead, 0.0)
             order.behind = max(order.behind, 0.0)
 
-    bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time)
-    ask_output = finalize_unresolved(ask_orders, quote_timeline, resolved_time)
+    append_quote_timeline_updates(
+        quote_timeline,
+        events,
+        event_index,
+        orderbook,
+        price_levels,
+        best_bid_index,
+        best_ask_index,
+        simulation_end + max(resolved_time, 0.0),
+    )
+
+    bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time, "bid")
+    ask_output = finalize_unresolved(ask_orders, quote_timeline, resolved_time, "ask")
     return (
         *bid_output[:9],
         *ask_output[:9],
