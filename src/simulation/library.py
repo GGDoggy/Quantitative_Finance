@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .constants import DEFAULT_RESOLVED_TIME
 from .best_size_changed import (
     ALGORITHM_NAME as BEST_SIZE_CHANGED_NAME,
     simulate_virtual_best_orders as simulate_best_size_changed,
@@ -44,6 +45,14 @@ SIMULATION_RESULT_KEYS = (
     "ask_vorder_ratio",
     "ask_result",
     "ask_spread",
+    "bid_mid_price",
+    "bid_micro_price",
+    "bid_mid_profit",
+    "bid_micro_profit",
+    "ask_mid_price",
+    "ask_micro_price",
+    "ask_mid_profit",
+    "ask_micro_profit",
 )
 
 ALGORITHMS = {
@@ -122,7 +131,7 @@ def load_dataset(dataset):
     return init, updates, trades, start_time
 
 
-def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick):
+def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     algorithm = get_algorithm(algorithm_name)
     init, updates, trades, start_time = load_dataset(dataset)
     return algorithm(
@@ -132,6 +141,7 @@ def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick):
         start_time,
         time_step=time_step,
         base_tick=base_tick,
+        resolved_time=resolved_time,
     )
 
 

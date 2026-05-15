@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from .constants import DEFAULT_RESOLVED_TIME
+
 
 ALGORITHM_NAME = "time_averaged_random_cancellation"
 DEBUG_BEST_STATE = os.environ.get("DEBUG_BEST_STATE", "").lower() in {"1", "true", "yes", "on"}
@@ -26,6 +28,7 @@ class VirtualOrder:
     remaining_size: float
     result: int = -1
     survival_time: float = -1.0
+    fill_time: float = np.nan
 
 
 @dataclass
@@ -331,6 +334,7 @@ def finalize_order(order, end_time, result):
         return
     order.result = result
     order.survival_time = float(end_time - order.submit_time)
+    order.fill_time = float(end_time) if result == 1 else np.nan
     order.ahead = max(order.ahead, 0.0)
     order.behind = max(order.behind, 0.0)
 
@@ -576,7 +580,87 @@ def reconcile_one_side(
     return True
 
 
-def finalize_unresolved(orders):
+def record_best_quote(quote_timeline, event_time, best_bid_price, best_bid_size, best_ask_price, best_ask_size):
+    quote_timeline.append(
+        (
+            float(event_time),
+            float(best_bid_price),
+            float(best_bid_size),
+            float(best_ask_price),
+            float(best_ask_size),
+        )
+    )
+
+
+def quote_has_complete_prices(best_bid_price, best_bid_size, best_ask_price, best_ask_size):
+    return (
+        np.isfinite(best_bid_price)
+        and np.isfinite(best_ask_price)
+        and best_bid_size > 0
+        and best_ask_size > 0
+    )
+
+
+def compute_quote_prices(best_bid_price, best_bid_size, best_ask_price, best_ask_size):
+    if not quote_has_complete_prices(best_bid_price, best_bid_size, best_ask_price, best_ask_size):
+        return np.nan, np.nan
+
+    mid_price = (best_bid_price + best_ask_price) / 2
+    total_size = best_bid_size + best_ask_size
+    if total_size <= 0:
+        return float(mid_price), np.nan
+
+    micro_price = (best_ask_price * best_bid_size + best_bid_price * best_ask_size) / total_size
+    return float(mid_price), float(micro_price)
+
+
+def get_evolved_prices(order, quote_timeline, resolved_time):
+    if order.result != 1 or not np.isfinite(order.fill_time) or not quote_timeline:
+        return np.nan, np.nan
+
+    target_time = order.fill_time + resolved_time
+    event_times = [quote[0] for quote in quote_timeline]
+    quote_position = bisect_right(event_times, target_time) - 1
+    if quote_position < 0:
+        return np.nan, np.nan
+    if target_time > quote_timeline[-1][0]:
+        return np.nan, np.nan
+
+    (
+        _event_time,
+        best_bid_price,
+        best_bid_size,
+        best_ask_price,
+        best_ask_size,
+    ) = quote_timeline[quote_position]
+    return compute_quote_prices(best_bid_price, best_bid_size, best_ask_price, best_ask_size)
+
+
+def compute_evolved_metrics(orders, quote_timeline, resolved_time):
+    mid_prices = []
+    micro_prices = []
+    mid_profits = []
+    micro_profits = []
+
+    for order in orders:
+        mid_price, micro_price = get_evolved_prices(order, quote_timeline, resolved_time)
+        mid_prices.append(mid_price)
+        micro_prices.append(micro_price)
+        mid_profits.append(mid_price - order.price if np.isfinite(mid_price) else np.nan)
+        micro_profits.append(micro_price - order.price if np.isfinite(micro_price) else np.nan)
+
+    return (
+        np.array(mid_prices, dtype=float),
+        np.array(micro_prices, dtype=float),
+        np.array(mid_profits, dtype=float),
+        np.array(micro_profits, dtype=float),
+    )
+
+
+def finalize_unresolved(orders, quote_timeline=None, resolved_time=DEFAULT_RESOLVED_TIME):
+    if quote_timeline is None:
+        quote_timeline = []
+
     price = np.array([order.price for order in orders], dtype=float)
     near_size = np.array([order.near_size for order in orders], dtype=float)
     opp_size = np.array([order.opp_size for order in orders], dtype=float)
@@ -586,7 +670,18 @@ def finalize_unresolved(orders):
     vorder_ratio = np.array([order.vorder_ratio for order in orders], dtype=float)
     result = np.array([order.result for order in orders], dtype=int)
     spread = np.array([order.spread for order in orders], dtype=float)
-    return price, near_size, opp_size, survival_time, ahead, behind, vorder_ratio, result, spread
+    return (
+        price,
+        near_size,
+        opp_size,
+        survival_time,
+        ahead,
+        behind,
+        vorder_ratio,
+        result,
+        spread,
+        *compute_evolved_metrics(orders, quote_timeline, resolved_time),
+    )
 
 
 def empty_outputs():
@@ -611,6 +706,14 @@ def empty_outputs():
         empty_sim.copy(),
         empty_result.copy(),
         empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
+        empty_sim.copy(),
     )
 
 
@@ -621,6 +724,7 @@ def simulate_virtual_best_orders(
     start_time,
     time_step,
     base_tick,
+    resolved_time=DEFAULT_RESOLVED_TIME,
 ):
     price_levels = {level[0] for level in init}
     price_levels.update(update[1] for update in updates)
@@ -645,6 +749,22 @@ def simulate_virtual_best_orders(
 
     if simulation_end < simulation_start:
         return empty_outputs()
+
+    quote_timeline = []
+    initial_bid_price, initial_bid_size, initial_ask_price, initial_ask_size = get_best_levels_from_indices(
+        orderbook,
+        price_levels,
+        best_bid_index,
+        best_ask_index,
+    )
+    record_best_quote(
+        quote_timeline,
+        orderbook_start_time,
+        initial_bid_price,
+        initial_bid_size,
+        initial_ask_price,
+        initial_ask_size,
+    )
 
     events = build_event_stream(updates, trades)
     event_index = 0
@@ -735,6 +855,14 @@ def simulate_virtual_best_orders(
                 event_side=event_side,
                 updated_index=updated_index,
             )
+            record_best_quote(
+                quote_timeline,
+                event_time,
+                current_bid_price,
+                current_bid_size,
+                current_ask_price,
+                current_ask_size,
+            )
 
             bid_consumed = reconcile_one_side(
                 "bid",
@@ -824,7 +952,11 @@ def simulate_virtual_best_orders(
             order.ahead = max(order.ahead, 0.0)
             order.behind = max(order.behind, 0.0)
 
+    bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time)
+    ask_output = finalize_unresolved(ask_orders, quote_timeline, resolved_time)
     return (
-        *finalize_unresolved(bid_orders),
-        *finalize_unresolved(ask_orders),
+        *bid_output[:9],
+        *ask_output[:9],
+        *bid_output[9:],
+        *ask_output[9:],
     )
