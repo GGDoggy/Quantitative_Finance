@@ -50,8 +50,20 @@ class OrderbookDashboard:
             options=list(PLOT_LABELS.values()),
             sizing_mode="stretch_width",
         )
-        self.refresh_button = pn.widgets.Button(name="Refresh Catalog", button_type="default", sizing_mode="stretch_width")
+        self.refresh_button = pn.widgets.Button(
+            name="Refresh Catalog",
+            button_type="default",
+            width=170,
+        )
         self.preprocess_button = pn.widgets.Button(name="Preprocess Selected", button_type="primary", sizing_mode="stretch_width")
+        self.dataset_summary = pn.pane.Markdown(
+            "No dataset selected.",
+            sizing_mode="stretch_width",
+        )
+        self.preprocess_progress = pn.pane.Markdown(
+            "No preprocess job running.",
+            sizing_mode="stretch_width",
+        )
         self.plot_area = pn.Column(
             pn.pane.Markdown("Select one or more preprocessed datasets to start plotting."),
             sizing_mode="stretch_both",
@@ -99,16 +111,20 @@ class OrderbookDashboard:
     def _handle_preprocess(self, _event) -> None:
         selected_batches = [self.raw_by_label[label] for label in self.raw_select.value if label in self.raw_by_label]
         if not selected_batches:
+            self.preprocess_progress.object = "No preprocess job running."
             self._set_status("Select at least one raw batch before preprocessing.", "warning")
             return
 
+        self.preprocess_progress.object = f"Queued {len(selected_batches)} raw batch(es) for preprocessing."
         self.preprocess_button.disabled = True
         try:
             progress_messages: list[str] = []
 
             def update_progress(message: str) -> None:
                 progress_messages.append(message)
-                self._set_status("\n".join(progress_messages), "primary")
+                progress_text = "\n".join(f"- {progress_message}" for progress_message in progress_messages)
+                self.preprocess_progress.object = progress_text
+                self._set_status(progress_text, "primary")
 
             preprocess_batches(
                 selected_batches,
@@ -122,8 +138,10 @@ class OrderbookDashboard:
                 if (dataset.product_id, dataset.timestamp) in {(batch.product_id, batch.timestamp) for batch in selected_batches}
             ]
             self.preprocessed_select.value = sorted(set(self.preprocessed_select.value + new_labels))
+            self.preprocess_progress.object = f"Completed preprocessing {len(selected_batches)} batch(es)."
             self._set_status(f"Preprocessed {len(selected_batches)} batch(es).", "success")
         except Exception as error:
+            self.preprocess_progress.object = f"Preprocess failed: {error}"
             self._set_status(f"Preprocess failed: {error}", "danger")
         finally:
             self.preprocess_button.disabled = False
@@ -138,13 +156,44 @@ class OrderbookDashboard:
             return pn.pane.Plotly(plot, config={"responsive": True}, sizing_mode="stretch_width")
         return pn.pane.HoloViews(plot, sizing_mode="stretch_width")
 
-    def _render_plots(self) -> None:
-        selected_datasets: list[PreprocessedDataset] = [
+    def _selected_datasets(self) -> list[PreprocessedDataset]:
+        return [
             self.preprocessed_by_label[label]
             for label in self.preprocessed_select.value
             if label in self.preprocessed_by_label
         ]
-        selected_plot_labels: list[str] = self.plot_select.value
+
+    def _selected_plot_labels(self) -> list[str]:
+        return [
+            label
+            for label in self.plot_select.value
+            if label in PLOT_LABELS.values()
+        ]
+
+    def _update_dataset_summary(self, selected_datasets: list[PreprocessedDataset]) -> None:
+        if not selected_datasets:
+            self.dataset_summary.object = "No preprocessed dataset selected."
+            return
+
+        product_ids = sorted({dataset.product_id for dataset in selected_datasets})
+        available_views = sorted(
+            {PLOT_LABELS.get(view, view) for dataset in selected_datasets for view in dataset.available_views}
+        )
+        dataset_lines = "\n".join(
+            f"- `{dataset.display_name}`"
+            for dataset in selected_datasets
+        )
+        self.dataset_summary.object = (
+            f"**Selected dataset count:** {len(selected_datasets)}\n\n"
+            f"**Product ids:** {', '.join(product_ids)}\n\n"
+            f"**Available advertised views:** {', '.join(available_views) or 'None'}\n\n"
+            f"**Datasets**\n{dataset_lines}"
+        )
+
+    def _render_plots(self) -> None:
+        selected_datasets = self._selected_datasets()
+        selected_plot_labels = self._selected_plot_labels()
+        self._update_dataset_summary(selected_datasets)
 
         if not selected_datasets:
             self.plot_area.objects = [pn.pane.Markdown("Select one or more preprocessed datasets to start plotting.")]
@@ -188,24 +237,92 @@ class OrderbookDashboard:
 
         self.plot_area.objects = plot_panes or [pn.pane.Markdown("No plots are available for the current selection.")]
 
-    def view(self):
-        controls = pn.Column(
-            "## Controls",
-            self.preprocessed_select,
-            self.raw_select,
-            self.plot_select,
-            self.preprocess_button,
-            self.refresh_button,
-            self.status,
-            width=420,
-            sizing_mode="stretch_height",
+    def build_header(self) -> pn.Row:
+        title = pn.Column(
+            "# Orderbook Dashboard",
+            "Coinbase market data catalog, preprocessing, and interactive order book visualizations.",
+            sizing_mode="stretch_width",
+            margin=(0, 20, 0, 0),
         )
-        content = pn.Column(
-            "## Visualization",
+        return pn.Row(
+            title,
+            pn.Spacer(sizing_mode="stretch_width"),
+            self.refresh_button,
+            sizing_mode="stretch_width",
+            align="center",
+        )
+
+    def build_dataset_section(self) -> pn.Card:
+        return pn.Card(
+            self.preprocessed_select,
+            title="Dataset selection",
+            collapsed=False,
+            sizing_mode="stretch_width",
+        )
+
+    def build_sidebar(self) -> pn.Column:
+        raw_batch_section = pn.Card(
+            self.raw_select,
+            self.preprocess_button,
+            title="Raw batch preprocessing",
+            collapsed=False,
+            sizing_mode="stretch_width",
+        )
+        return pn.Column(
+            "## Controls",
+            self.build_dataset_section(),
+            raw_batch_section,
+            sizing_mode="stretch_height",
+            width=420,
+        )
+
+    def build_plot_section(self) -> pn.Card:
+        plot_controls = pn.Row(
+            self.plot_select,
+            sizing_mode="stretch_width",
+        )
+        summary = pn.Card(
+            self.dataset_summary,
+            title="Selected dataset summary",
+            collapsed=False,
+            sizing_mode="stretch_width",
+        )
+        workspace = pn.Card(
             self.plot_area,
+            title="Plot workspace",
+            collapsed=False,
             sizing_mode="stretch_both",
         )
-        return pn.Row(controls, content, sizing_mode="stretch_both")
+        return pn.Card(
+            "## Main workspace",
+            plot_controls,
+            summary,
+            workspace,
+            title="Visualization",
+            collapsed=False,
+            sizing_mode="stretch_both",
+        )
+
+    def build_status_section(self) -> pn.Card:
+        return pn.Card(
+            self.status,
+            self.preprocess_progress,
+            title="Status",
+            collapsed=False,
+            sizing_mode="stretch_width",
+        )
+
+    def view(self):
+        return pn.template.FastListTemplate(
+            title="Orderbook Viewer",
+            sidebar=[self.build_sidebar()],
+            main=[
+                self.build_header(),
+                self.build_plot_section(),
+                self.build_status_section(),
+            ],
+            main_layout=None,
+        )
 
 
 def build_app():
