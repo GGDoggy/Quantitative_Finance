@@ -18,6 +18,8 @@ from .library import (
     run_datasets_in_parallel,
     save_simulation_npz,
 )
+from .constants import DEFAULT_RESOLVED_TIME
+from .service import SimulationJobResult, simulate_batch, simulate_batches
 from .time_averaged_random_cancellation import (
     ALGORITHM_NAME as TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
 )
@@ -27,6 +29,7 @@ __all__ = [
     "BEST_SIZE_CHANGED_NAME",
     "DATA_V3_PATH",
     "DEFAULT_BASE_TICK",
+    "DEFAULT_RESOLVED_TIME",
     "DEFAULT_TIME_STEP",
     "EVENT_BALANCED_NAME",
     "OUTPUT_PATH",
@@ -43,4 +46,7 @@ __all__ = [
     "run_dataset_simulation",
     "run_datasets_in_parallel",
     "save_simulation_npz",
+    "SimulationJobResult",
+    "simulate_batch",
+    "simulate_batches",
 ]
