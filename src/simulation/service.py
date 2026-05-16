@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import math
 from typing import TYPE_CHECKING, Callable
 
 from .constants import DEFAULT_RESOLVED_TIME
@@ -31,8 +32,12 @@ def _validate_parameters(
     resolved_time: float,
 ) -> None:
     get_algorithm(algorithm_name)
+    if not math.isfinite(time_step):
+        raise ValueError("Simulation time_step must be finite.")
     if time_step <= 0:
         raise ValueError("Simulation time_step must be positive.")
+    if not math.isfinite(resolved_time):
+        raise ValueError("Simulation resolved_time must be finite.")
     if resolved_time < 0:
         raise ValueError("Simulation resolved_time must be non-negative.")
 

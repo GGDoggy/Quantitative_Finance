@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import sys
 
 
@@ -148,6 +149,94 @@ def test_simulate_batches_validates_parameters_and_emits_progress(tmp_path, monk
         assert "resolved_time" in str(exc)
     else:
         raise AssertionError("Expected invalid resolved_time to raise ValueError.")
+
+    for parameter_name, kwargs in (
+        ("time_step", {"time_step": math.nan, "resolved_time": 1.0}),
+        ("resolved_time", {"time_step": 0.1, "resolved_time": math.inf}),
+    ):
+        try:
+            simulate_batches(
+                [raw_batch],
+                output_dir=tmp_path,
+                algorithm_name="event_balanced",
+                **kwargs,
+            )
+        except ValueError as exc:
+            assert parameter_name in str(exc)
+            assert "finite" in str(exc)
+        else:
+            raise AssertionError(
+                f"Expected non-finite {parameter_name} to raise ValueError."
+            )
+
+
+def test_dashboard_reports_blank_simulation_parameters(tmp_path, monkeypatch):
+    raw_batch = _make_raw_batch(tmp_path)
+
+    monkeypatch.setattr(
+        dashboard_module,
+        "discover_raw_batches",
+        lambda raw_dir, preprocessed_dir: [raw_batch],
+    )
+    monkeypatch.setattr(
+        dashboard_module,
+        "discover_preprocessed_datasets",
+        lambda preprocessed_dir: [],
+    )
+
+    called = {"simulate": False}
+
+    def fake_simulate_batches(*args, **kwargs):
+        called["simulate"] = True
+        return []
+
+    monkeypatch.setattr(dashboard_module, "simulate_batches", fake_simulate_batches)
+
+    dashboard = dashboard_module.OrderbookDashboard(tmp_path, tmp_path)
+    dashboard.simulation_raw_select.value = [raw_batch.display_name]
+    dashboard.simulation_algorithm_select.value = "event_balanced"
+    dashboard.simulation_resolved_time_input.value = 1.0
+    dashboard.simulation_time_step_input.value = None
+
+    dashboard._handle_simulation(None)
+
+    assert called["simulate"] is False
+    assert dashboard.simulation_button.disabled is False
+    assert dashboard.simulation_button.loading is False
+    assert dashboard.status.alert_type == "danger"
+    assert "Simulation time_step is required" in dashboard.status.object
+    assert "Simulation time_step is required" in dashboard.simulation_progress.object
+
+
+def test_dashboard_rejects_non_finite_simulation_parameters(tmp_path, monkeypatch):
+    raw_batch = _make_raw_batch(tmp_path)
+
+    monkeypatch.setattr(
+        dashboard_module,
+        "discover_raw_batches",
+        lambda raw_dir, preprocessed_dir: [raw_batch],
+    )
+    monkeypatch.setattr(
+        dashboard_module,
+        "discover_preprocessed_datasets",
+        lambda preprocessed_dir: [],
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("simulate_batches should not run")
+
+    monkeypatch.setattr(dashboard_module, "simulate_batches", fail_if_called)
+
+    dashboard = dashboard_module.OrderbookDashboard(tmp_path, tmp_path)
+    dashboard.simulation_raw_select.value = [raw_batch.display_name]
+    dashboard.simulation_resolved_time_input.value = math.nan
+    dashboard.simulation_time_step_input.value = 0.1
+
+    dashboard._handle_simulation(None)
+
+    assert dashboard.status.alert_type == "danger"
+    assert "Simulation resolved_time must be finite" in dashboard.status.object
+    assert dashboard.simulation_button.disabled is False
 
 
 def test_dashboard_refresh_and_run_simulation_use_all_raw_batches(tmp_path, monkeypatch):

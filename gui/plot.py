@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 import sys
 
 if __package__ is None or __package__ == "":
@@ -440,6 +441,15 @@ class OrderbookDashboard:
             f"**Progress**\n{progress_lines}"
         )
 
+    @staticmethod
+    def _read_required_finite_float(value: object, label: str) -> float:
+        if value is None:
+            raise ValueError(f"{label} is required.")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(f"{label} must be finite.")
+        return number
+
     def _handle_preprocess(self, _event) -> None:
         selected_batches = [
             self.raw_by_label[label]
@@ -519,21 +529,30 @@ class OrderbookDashboard:
             return
 
         algorithm_name = self.simulation_algorithm_select.value
-        resolved_time = float(self.simulation_resolved_time_input.value)
-        time_step = float(self.simulation_time_step_input.value)
         batch_count = len(selected_batches)
-        progress_messages = [
-            (
-                f"Queued {batch_count} raw batch(es) for simulation with "
-                f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}."
-            )
-        ]
-        self.simulation_progress.object = self._format_simulation_progress(
-            batch_count, progress_messages
-        )
-        self._set_status(f"Running simulation for {batch_count} raw batch(es)...", "primary")
+        progress_messages: list[str] = []
         self._set_simulation_loading(True)
         try:
+            resolved_time = self._read_required_finite_float(
+                self.simulation_resolved_time_input.value,
+                "Simulation resolved_time",
+            )
+            time_step = self._read_required_finite_float(
+                self.simulation_time_step_input.value,
+                "Simulation time_step",
+            )
+            progress_messages.append(
+                (
+                    f"Queued {batch_count} raw batch(es) for simulation with "
+                    f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}."
+                )
+            )
+            self.simulation_progress.object = self._format_simulation_progress(
+                batch_count, progress_messages
+            )
+            self._set_status(
+                f"Running simulation for {batch_count} raw batch(es)...", "primary"
+            )
 
             def update_progress(message: str) -> None:
                 progress_messages.append(message)
