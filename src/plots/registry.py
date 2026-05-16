@@ -47,6 +47,18 @@ def build_fill_probability_view(locators: list["PlotDatasetLocator"]):
     return implementation(locators)
 
 
+def build_mid_profit_view(locators: list["PlotDatasetLocator"]):
+    from src.plots.profit_heatmap import build_mid_profit_view as implementation
+
+    return implementation(locators)
+
+
+def build_micro_profit_view(locators: list["PlotDatasetLocator"]):
+    from src.plots.profit_heatmap import build_micro_profit_view as implementation
+
+    return implementation(locators)
+
+
 def build_orderbook_payload(context: object) -> dict[str, object]:
     from src.preprocess.orderbook import build_orderbook_payload as implementation
 
@@ -93,6 +105,20 @@ PLOT_REGISTRY: dict[str, PlotSpec] = {
         key="fill_probability",
         label="Fill Probability",
         plot_builder=build_fill_probability_view,
+        preprocess_builder=None,
+        required_payload_keys=("__simulation_npz__",),
+    ),
+    "mid_profit": PlotSpec(
+        key="mid_profit",
+        label="Mid Profit",
+        plot_builder=build_mid_profit_view,
+        preprocess_builder=None,
+        required_payload_keys=("__simulation_npz__",),
+    ),
+    "micro_profit": PlotSpec(
+        key="micro_profit",
+        label="Micro Profit",
+        plot_builder=build_micro_profit_view,
         preprocess_builder=None,
         required_payload_keys=("__simulation_npz__",),
     ),
