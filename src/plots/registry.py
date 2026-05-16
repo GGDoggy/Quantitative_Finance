@@ -59,6 +59,26 @@ def build_micro_profit_view(locators: list["PlotDatasetLocator"]):
     return implementation(locators)
 
 
+def build_mid_cost_fill_probability_view(
+    locators: list["PlotDatasetLocator"], *, cost: float
+):
+    from src.plots.cost_fill_probability import (
+        build_mid_cost_fill_probability_view as implementation,
+    )
+
+    return implementation(locators, cost=cost)
+
+
+def build_micro_cost_fill_probability_view(
+    locators: list["PlotDatasetLocator"], *, cost: float
+):
+    from src.plots.cost_fill_probability import (
+        build_micro_cost_fill_probability_view as implementation,
+    )
+
+    return implementation(locators, cost=cost)
+
+
 def build_orderbook_payload(context: object) -> dict[str, object]:
     from src.preprocess.orderbook import build_orderbook_payload as implementation
 
@@ -119,6 +139,20 @@ PLOT_REGISTRY: dict[str, PlotSpec] = {
         key="micro_profit",
         label="Micro Profit",
         plot_builder=build_micro_profit_view,
+        preprocess_builder=None,
+        required_payload_keys=("__simulation_npz__",),
+    ),
+    "mid_fill_probability_cost": PlotSpec(
+        key="mid_fill_probability_cost",
+        label="Mid Fill Probability > Cost",
+        plot_builder=build_mid_cost_fill_probability_view,
+        preprocess_builder=None,
+        required_payload_keys=("__simulation_npz__",),
+    ),
+    "micro_fill_probability_cost": PlotSpec(
+        key="micro_fill_probability_cost",
+        label="Micro Fill Probability > Cost",
+        plot_builder=build_micro_cost_fill_probability_view,
         preprocess_builder=None,
         required_payload_keys=("__simulation_npz__",),
     ),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 import sys
 
@@ -204,6 +205,12 @@ SIMULATION_HEATMAP_PLOT_TYPES = {
     "fill_probability",
     "mid_profit",
     "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+}
+COST_FILTERED_PLOT_TYPES = {
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
 }
 
 
@@ -245,6 +252,13 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
             visible=False,
             disabled=True,
+        )
+        self.cost_input = pn.widgets.TextInput(
+            name="Cost",
+            value="0",
+            placeholder="Enter a finite cost value",
+            sizing_mode="stretch_width",
+            visible=False,
         )
         self.refresh_button = pn.widgets.Button(
             name="Refresh Catalog",
@@ -290,6 +304,7 @@ class OrderbookDashboard:
         self.plot_select.param.watch(self._handle_plot_change, "value")
         self.timestamp_select.param.watch(self._handle_timestamp_change, "value")
         self.fill_group_select.param.watch(self._handle_fill_group_change, "value")
+        self.cost_input.param.watch(self._handle_cost_change, "value")
 
         self.refresh_catalog()
 
@@ -511,6 +526,12 @@ class OrderbookDashboard:
             return
         self._render_plots()
 
+    def _handle_cost_change(self, _event) -> None:
+        if self._updating_controls:
+            return
+        if self._selected_plot_type() in COST_FILTERED_PLOT_TYPES:
+            self._render_plots()
+
     def _handle_raw_selection_change(self, _event) -> None:
         self._update_raw_summary()
 
@@ -606,17 +627,51 @@ class OrderbookDashboard:
                 self.fill_group_select.options = fill_group_select_options
             if self.fill_group_select.value != next_group:
                 self.fill_group_select.value = next_group
+            self._sync_cost_input(render=False)
         finally:
             self._updating_controls = False
 
         if render:
             self._render_plots()
 
+    def _sync_cost_input(self, *, render: bool) -> None:
+        show_cost_input = self._selected_plot_type() in COST_FILTERED_PLOT_TYPES
+
+        self._updating_controls = True
+        try:
+            if self.cost_input.visible != show_cost_input:
+                self.cost_input.visible = show_cost_input
+            if self.cost_input.disabled == show_cost_input:
+                self.cost_input.disabled = not show_cost_input
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
+
+    def _selected_cost(self) -> float:
+        raw_value = self.cost_input.value.strip()
+        if not raw_value:
+            raise ValueError("Cost is required for cost-filtered fill probability plots.")
+
+        try:
+            cost = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"Cost must be a finite number: {raw_value!r}") from exc
+
+        if not math.isfinite(cost):
+            raise ValueError(f"Cost must be a finite number: {raw_value!r}")
+
+        return cost
+
     def _build_plot_pane(
         self, plot_type: str, locators: list[PlotDatasetLocator]
     ) -> pn.viewable.Viewable:
         builder = PLOT_REGISTRY[plot_type].plot_builder
-        plot = builder(locators)
+        if plot_type in COST_FILTERED_PLOT_TYPES:
+            plot = builder(locators, cost=self._selected_cost())
+        else:
+            plot = builder(locators)
         if isinstance(plot, Figure):
             themed_plot = Figure(plot)
             themed_plot.update_layout(**PLOTLY_DARK_LAYOUT)
@@ -1252,14 +1307,18 @@ class OrderbookDashboard:
         is_simulation_heatmap = (
             self._selected_plot_type() in SIMULATION_HEATMAP_PLOT_TYPES
         )
+        show_cost_input = self._selected_plot_type() in COST_FILTERED_PLOT_TYPES
         self.timestamp_select.visible = not is_simulation_heatmap
         self.timestamp_select.disabled = is_simulation_heatmap
         self.fill_group_select.visible = is_simulation_heatmap
         self.fill_group_select.disabled = not is_simulation_heatmap
+        self.cost_input.visible = show_cost_input
+        self.cost_input.disabled = not show_cost_input
         plot_controls = self._card(
             self.plot_select,
             self.timestamp_select,
             self.fill_group_select,
+            self.cost_input,
             title="Plot controls",
             css_classes=["qf-plot-controls"],
         )

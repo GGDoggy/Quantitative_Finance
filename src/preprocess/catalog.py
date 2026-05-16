@@ -20,6 +20,8 @@ SIMULATION_VIEW_KEYS = (
     "fill_probability",
     "mid_profit",
     "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
 )
 
 
