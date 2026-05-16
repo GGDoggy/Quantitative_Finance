@@ -614,11 +614,23 @@ def compute_quote_prices(best_bid_price, best_bid_size, best_ask_price, best_ask
     return float(mid_price), float(micro_price)
 
 
+def get_profit_target_time(order, resolved_time):
+    if order.result == 1:
+        if not np.isfinite(order.fill_time):
+            return np.nan
+        return float(order.fill_time + resolved_time)
+    if order.result == 0:
+        return float(order.submit_time + resolved_time)
+    return np.nan
+
+
 def get_evolved_prices(order, quote_timeline, event_times, resolved_time):
-    if order.result != 1 or not np.isfinite(order.fill_time) or not quote_timeline:
+    if not quote_timeline:
         return np.nan, np.nan
 
-    target_time = order.fill_time + resolved_time
+    target_time = get_profit_target_time(order, resolved_time)
+    if not np.isfinite(target_time):
+        return np.nan, np.nan
     quote_position = bisect_right(event_times, target_time) - 1
     if quote_position < 0:
         return np.nan, np.nan

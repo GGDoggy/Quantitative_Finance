@@ -16,11 +16,13 @@ SIMULATION_REQUIRED_KEYS = (
     "bid_near_size",
     "bid_opp_size",
     "bid_mid_profit",
+    "bid_result",
     "ask_near_size",
     "ask_opp_size",
     "ask_mid_profit",
     "bid_micro_profit",
     "ask_micro_profit",
+    "ask_result",
 )
 
 
@@ -29,10 +31,12 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
     bid_opp_size = []
     bid_mid_profit = []
     bid_micro_profit = []
+    bid_result = []
     ask_near_size = []
     ask_opp_size = []
     ask_mid_profit = []
     ask_micro_profit = []
+    ask_result = []
 
     for path in paths:
         with np.load(path, allow_pickle=False) as data:
@@ -47,10 +51,12 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
             bid_opp_size.append(np.asarray(data["bid_opp_size"], dtype=float))
             bid_mid_profit.append(np.asarray(data["bid_mid_profit"], dtype=float))
             bid_micro_profit.append(np.asarray(data["bid_micro_profit"], dtype=float))
+            bid_result.append(np.asarray(data["bid_result"], dtype=int))
             ask_near_size.append(np.asarray(data["ask_near_size"], dtype=float))
             ask_opp_size.append(np.asarray(data["ask_opp_size"], dtype=float))
             ask_mid_profit.append(np.asarray(data["ask_mid_profit"], dtype=float))
             ask_micro_profit.append(np.asarray(data["ask_micro_profit"], dtype=float))
+            ask_result.append(np.asarray(data["ask_result"], dtype=int))
 
     return {
         "bid_near_size": (
@@ -69,6 +75,9 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
             if bid_micro_profit
             else np.array([], dtype=float)
         ),
+        "bid_result": (
+            np.concatenate(bid_result) if bid_result else np.array([], dtype=int)
+        ),
         "ask_near_size": (
             np.concatenate(ask_near_size) if ask_near_size else np.array([], dtype=float)
         ),
@@ -84,6 +93,9 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
             np.concatenate(ask_micro_profit)
             if ask_micro_profit
             else np.array([], dtype=float)
+        ),
+        "ask_result": (
+            np.concatenate(ask_result) if ask_result else np.array([], dtype=int)
         ),
     }
 
@@ -106,6 +118,7 @@ def compute_profit_grid(
     near_size,
     opp_size,
     profit,
+    result,
     bins: int,
     *,
     size_min: float,
@@ -115,8 +128,14 @@ def compute_profit_grid(
     near_size = np.asarray(near_size, dtype=float)
     opp_size = np.asarray(opp_size, dtype=float)
     profit = np.asarray(profit, dtype=float)
+    result = np.asarray(result, dtype=int)
 
-    valid_mask = np.isfinite(near_size) & np.isfinite(opp_size) & np.isfinite(profit)
+    valid_mask = (
+        np.isfinite(near_size)
+        & np.isfinite(opp_size)
+        & np.isfinite(profit)
+        & (result == 1)
+    )
     near_size = near_size[valid_mask]
     opp_size = opp_size[valid_mask]
     profit = profit[valid_mask]
@@ -244,6 +263,7 @@ def _grid_for_side(
         arrays[f"{side}_near_size"],
         arrays[f"{side}_opp_size"],
         arrays[_profit_key(side, metric_key)],
+        arrays[f"{side}_result"],
         settings.axis.shared_bins,
         size_min=settings.axis.size_min,
         size_max=settings.axis.size_max,
