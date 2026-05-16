@@ -8,12 +8,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.preprocess.catalog import PlotDatasetLocator, find_simulation_files
+from src.plots.settings import (
+    FillProbabilityPlotSettings,
+    PlotRenderOptions,
+)
 
 
-BINS = 20
-SIZE_RANGE = (1e-3, 10.0)
 RESOLVED_ONLY = True
-LOG_SPACED_BINS = True
 SIMULATION_REQUIRED_KEYS = (
     "bid_near_size",
     "bid_opp_size",
@@ -90,7 +91,30 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
     )
 
 
-def compute_fill_probability_grid(near_size, opp_size, result, bins):
+def _bin_edges(
+    bins: int, *, size_min: float, size_max: float, use_log_bins: bool
+) -> tuple[np.ndarray, np.ndarray]:
+    if use_log_bins:
+        if size_min <= 0 or size_max <= 0:
+            raise ValueError("Log-spaced bins require a strictly positive size range.")
+        near_edges = np.geomspace(size_min, size_max, bins + 1)
+        opp_edges = np.geomspace(size_min, size_max, bins + 1)
+    else:
+        near_edges = np.linspace(size_min, size_max, bins + 1)
+        opp_edges = np.linspace(size_min, size_max, bins + 1)
+    return near_edges, opp_edges
+
+
+def compute_fill_probability_grid(
+    near_size,
+    opp_size,
+    result,
+    bins: int,
+    *,
+    size_min: float,
+    size_max: float,
+    use_log_bins: bool,
+):
     near_size = np.asarray(near_size, dtype=float)
     opp_size = np.asarray(opp_size, dtype=float)
     result = np.asarray(result, dtype=int)
@@ -108,14 +132,12 @@ def compute_fill_probability_grid(near_size, opp_size, result, bins):
     if len(near_size) == 0:
         raise ValueError("No valid orders available for fill probability plotting.")
 
-    if LOG_SPACED_BINS:
-        if SIZE_RANGE[0] <= 0 or SIZE_RANGE[1] <= 0:
-            raise ValueError("Log-spaced bins require a strictly positive SIZE_RANGE.")
-        near_edges = np.geomspace(*SIZE_RANGE, bins + 1)
-        opp_edges = np.geomspace(*SIZE_RANGE, bins + 1)
-    else:
-        near_edges = np.linspace(*SIZE_RANGE, bins + 1)
-        opp_edges = np.linspace(*SIZE_RANGE, bins + 1)
+    near_edges, opp_edges = _bin_edges(
+        bins,
+        size_min=size_min,
+        size_max=size_max,
+        use_log_bins=use_log_bins,
+    )
 
     total_count, _, _ = np.histogram2d(near_size, opp_size, bins=[near_edges, opp_edges])
     fill_count, _, _ = np.histogram2d(
@@ -133,8 +155,8 @@ def compute_fill_probability_grid(near_size, opp_size, result, bins):
     return near_edges, opp_edges, fill_probability, total_count
 
 
-def _bin_centers(edges: np.ndarray) -> np.ndarray:
-    if LOG_SPACED_BINS:
+def _bin_centers(edges: np.ndarray, *, use_log_bins: bool) -> np.ndarray:
+    if use_log_bins:
         return np.sqrt(edges[:-1] * edges[1:])
     return (edges[:-1] + edges[1:]) / 2.0
 
@@ -153,6 +175,7 @@ def _heatmap_trace(
     colorbar_x: float | None = None,
     colorbar_y: float | None = None,
     colorbar_len: float | None = None,
+    use_log_bins: bool = True,
 ) -> go.Heatmap:
     colorbar = None
     if colorbar_title is not None:
@@ -166,8 +189,8 @@ def _heatmap_trace(
         colorbar["thickness"] = 18
 
     return go.Heatmap(
-        x=_bin_centers(near_edges),
-        y=_bin_centers(opp_edges),
+        x=_bin_centers(near_edges, use_log_bins=use_log_bins),
+        y=_bin_centers(opp_edges, use_log_bins=use_log_bins),
         z=values.T,
         colorscale=colorscale,
         zmin=zmin,
@@ -193,13 +216,21 @@ def _add_grid_traces(
     show_count_scale: bool,
     probability_colorbar_y: float,
     count_colorbar_y: float,
+    probability_zmin: float | None = None,
+    probability_zmax: float | None = None,
+    count_zmin: float | None = None,
     count_zmax: float | None = None,
+    axis_settings: FillProbabilityPlotSettings | None = None,
 ) -> None:
+    settings = axis_settings or FillProbabilityPlotSettings()
     near_edges, opp_edges, fill_probability, sample_count = compute_fill_probability_grid(
         near_size,
         opp_size,
         result,
-        BINS,
+        settings.axis.shared_bins,
+        size_min=settings.axis.size_min,
+        size_max=settings.axis.size_max,
+        use_log_bins=settings.axis.use_log_bins,
     )
 
     figure.add_trace(
@@ -209,13 +240,14 @@ def _add_grid_traces(
             fill_probability,
             "Viridis",
             name=probability_title,
-            zmin=0.0,
-            zmax=1.0,
+            zmin=probability_zmin,
+            zmax=probability_zmax,
             colorbar_title="Fill Probability" if show_probability_scale else None,
             showscale=show_probability_scale,
             colorbar_x=1.01 if show_probability_scale else None,
             colorbar_y=probability_colorbar_y if show_probability_scale else None,
             colorbar_len=0.34 if show_probability_scale else None,
+            use_log_bins=settings.axis.use_log_bins,
         ),
         row=1,
         col=probability_col,
@@ -227,13 +259,14 @@ def _add_grid_traces(
             sample_count,
             "Magma",
             name=count_title,
-            zmin=0.0,
+            zmin=count_zmin,
             zmax=count_zmax,
             colorbar_title="Sample Count" if show_count_scale else None,
             showscale=show_count_scale,
             colorbar_x=1.01 if show_count_scale else None,
             colorbar_y=count_colorbar_y if show_count_scale else None,
             colorbar_len=0.34 if show_count_scale else None,
+            use_log_bins=settings.axis.use_log_bins,
         ),
         row=2,
         col=count_col,
@@ -242,6 +275,7 @@ def _add_grid_traces(
 
 def _shared_sample_count_zmax(
     *orders: tuple[np.ndarray, np.ndarray, np.ndarray],
+    settings: FillProbabilityPlotSettings,
 ) -> float | None:
     sample_count_maxima = []
 
@@ -250,7 +284,10 @@ def _shared_sample_count_zmax(
             near_size,
             opp_size,
             result,
-            BINS,
+            settings.axis.shared_bins,
+            size_min=settings.axis.size_min,
+            size_max=settings.axis.size_max,
+            use_log_bins=settings.axis.use_log_bins,
         )
         if sample_count.size > 0:
             sample_count_maxima.append(float(np.nanmax(sample_count)))
@@ -265,7 +302,18 @@ def _shared_sample_count_zmax(
     return shared_zmax
 
 
-def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure:
+def build_fill_probability_view(
+    locators: list[PlotDatasetLocator],
+    render_options: PlotRenderOptions | None = None,
+) -> go.Figure:
+    settings = (
+        render_options.simulation_heatmap_settings
+        if isinstance(
+            getattr(render_options, "simulation_heatmap_settings", None),
+            FillProbabilityPlotSettings,
+        )
+        else FillProbabilityPlotSettings()
+    )
     simulation_paths = [_simulation_path(locator) for locator in locators]
     (
         bid_near_size,
@@ -279,6 +327,19 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
     shared_count_zmax = _shared_sample_count_zmax(
         (bid_near_size, bid_opp_size, bid_result),
         (ask_near_size, ask_opp_size, ask_result),
+        settings=settings,
+    )
+    probability_zmin = settings.metric_range.min
+    probability_zmax = settings.metric_range.max
+    count_zmin = (
+        settings.sample_count_range.min
+        if not settings.sample_count_range.auto
+        else 0.0
+    )
+    count_zmax = (
+        settings.sample_count_range.max
+        if not settings.sample_count_range.auto
+        else shared_count_zmax
     )
 
     figure = make_subplots(
@@ -307,7 +368,11 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         show_count_scale=True,
         probability_colorbar_y=0.79,
         count_colorbar_y=0.21,
-        count_zmax=shared_count_zmax,
+        probability_zmin=probability_zmin,
+        probability_zmax=probability_zmax,
+        count_zmin=count_zmin,
+        count_zmax=count_zmax,
+        axis_settings=settings,
     )
     _add_grid_traces(
         figure,
@@ -322,14 +387,18 @@ def build_fill_probability_view(locators: list[PlotDatasetLocator]) -> go.Figure
         show_count_scale=False,
         probability_colorbar_y=0.79,
         count_colorbar_y=0.21,
-        count_zmax=shared_count_zmax,
+        probability_zmin=probability_zmin,
+        probability_zmax=probability_zmax,
+        count_zmin=count_zmin,
+        count_zmax=count_zmax,
+        axis_settings=settings,
     )
 
     for row in (1, 2):
         for col in (1, 2):
             figure.update_xaxes(title_text="Near Size", row=row, col=col)
             figure.update_yaxes(title_text="Opp Size", row=row, col=col)
-            if LOG_SPACED_BINS:
+            if settings.axis.use_log_bins:
                 figure.update_xaxes(type="log", row=row, col=col)
                 figure.update_yaxes(type="log", row=row, col=col)
             # Keep both axes on the same visual scale so each heatmap bin renders square.

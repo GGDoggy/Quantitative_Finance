@@ -4,10 +4,14 @@ import plotly.graph_objects as go
 
 from src.preprocess.catalog import PlotDatasetLocator
 
+from .settings import PlotRenderOptions
 from .trades_scatter import SIDE_COLORS, SIDE_LABELS, _extract_trades
 
 
-def build_trade_volume_timeline_view(locators: list[PlotDatasetLocator]):
+def build_trade_volume_timeline_view(
+    locators: list[PlotDatasetLocator],
+    render_options: PlotRenderOptions | None = None,
+):
     trade_frame, product_id = _extract_trades(locators)
 
     figure = go.Figure()

@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from .settings import PlotRenderOptions
+
 
 @runtime_checkable
 class PlotDatasetLocator(Protocol):
@@ -18,3 +20,12 @@ class PlotDatasetLocator(Protocol):
 
     @property
     def base_id(self) -> str: ...
+
+
+@runtime_checkable
+class PlotBuilder(Protocol):
+    def __call__(
+        self,
+        locators: list[PlotDatasetLocator],
+        render_options: PlotRenderOptions | None = None,
+    ) -> object: ...

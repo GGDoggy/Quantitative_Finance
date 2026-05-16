@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 from src.preprocess.catalog import PlotDatasetLocator
 
 from .errors import PreprocessedDataError
+from .settings import PlotRenderOptions
 
 
 SIDE_LABELS = {-1.0: "buy taker", 1.0: "sell taker"}
@@ -89,7 +90,10 @@ def _extract_trades(items: Sequence[PlotDatasetLocator | pd.DataFrame]) -> tuple
     return trade_frame, next(iter(product_ids))
 
 
-def build_trades_scatter_view(locators: list[PlotDatasetLocator]):
+def build_trades_scatter_view(
+    locators: list[PlotDatasetLocator],
+    render_options: PlotRenderOptions | None = None,
+):
     trade_frame, product_id = _extract_trades(locators)
 
     figure = go.Figure()

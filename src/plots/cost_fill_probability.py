@@ -9,24 +9,27 @@ from plotly.subplots import make_subplots
 
 from src.plots.fill_probability import _simulation_path, _heatmap_trace
 from src.plots.profit_heatmap import load_simulation_arrays
+from src.plots.settings import (
+    ConditionalFillProbabilityPlotSettings,
+    PlotRenderOptions,
+)
 from src.plots.types import PlotDatasetLocator
 
 
-BINS = 20
-SIZE_RANGE = (1e-3, 10.0)
 RESOLVED_ONLY = True
-LOG_SPACED_BINS = True
 
 
-def _bin_edges(bins: int) -> tuple[np.ndarray, np.ndarray]:
-    if LOG_SPACED_BINS:
-        if SIZE_RANGE[0] <= 0 or SIZE_RANGE[1] <= 0:
-            raise ValueError("Log-spaced bins require a strictly positive SIZE_RANGE.")
-        near_edges = np.geomspace(*SIZE_RANGE, bins + 1)
-        opp_edges = np.geomspace(*SIZE_RANGE, bins + 1)
+def _bin_edges(
+    bins: int, *, size_min: float, size_max: float, use_log_bins: bool
+) -> tuple[np.ndarray, np.ndarray]:
+    if use_log_bins:
+        if size_min <= 0 or size_max <= 0:
+            raise ValueError("Log-spaced bins require a strictly positive size range.")
+        near_edges = np.geomspace(size_min, size_max, bins + 1)
+        opp_edges = np.geomspace(size_min, size_max, bins + 1)
     else:
-        near_edges = np.linspace(*SIZE_RANGE, bins + 1)
-        opp_edges = np.linspace(*SIZE_RANGE, bins + 1)
+        near_edges = np.linspace(size_min, size_max, bins + 1)
+        opp_edges = np.linspace(size_min, size_max, bins + 1)
     return near_edges, opp_edges
 
 
@@ -37,6 +40,10 @@ def compute_cost_filtered_fill_probability_grid(
     profit,
     bins: int,
     cost: float,
+    *,
+    size_min: float,
+    size_max: float,
+    use_log_bins: bool,
 ):
     near_size = np.asarray(near_size, dtype=float)
     opp_size = np.asarray(opp_size, dtype=float)
@@ -60,7 +67,12 @@ def compute_cost_filtered_fill_probability_grid(
             "the profit > cost filter."
         )
 
-    near_edges, opp_edges = _bin_edges(bins)
+    near_edges, opp_edges = _bin_edges(
+        bins,
+        size_min=size_min,
+        size_max=size_max,
+        use_log_bins=use_log_bins,
+    )
     total_count, _, _ = np.histogram2d(near_size, opp_size, bins=[near_edges, opp_edges])
     fill_count, _, _ = np.histogram2d(
         near_size[result == 1],
@@ -103,14 +115,18 @@ def _grid_for_side(
     side: str,
     metric_key: str,
     cost: float,
+    settings: ConditionalFillProbabilityPlotSettings,
 ):
     return compute_cost_filtered_fill_probability_grid(
         arrays[f"{side}_near_size"],
         arrays[f"{side}_opp_size"],
         arrays[f"{side}_result"],
         arrays[f"{side}_{metric_key}"],
-        BINS,
+        settings.axis.shared_bins,
         cost,
+        size_min=settings.axis.size_min,
+        size_max=settings.axis.size_max,
+        use_log_bins=settings.axis.use_log_bins,
     )
 
 
@@ -144,9 +160,19 @@ def _load_arrays(paths: Iterable[Path | str]) -> dict[str, np.ndarray]:
 def build_cost_fill_probability_view(
     locators: list[PlotDatasetLocator],
     metric_key: str,
-    *,
-    cost: float,
+    render_options: PlotRenderOptions | None = None,
 ) -> go.Figure:
+    cost = render_options.cost if render_options is not None else None
+    if cost is None:
+        raise ValueError("Cost is required for cost-filtered fill probability plots.")
+    settings = (
+        render_options.simulation_heatmap_settings
+        if isinstance(
+            getattr(render_options, "simulation_heatmap_settings", None),
+            ConditionalFillProbabilityPlotSettings,
+        )
+        else ConditionalFillProbabilityPlotSettings()
+    )
     simulation_paths = [_simulation_path(locator) for locator in locators]
     arrays = _load_arrays(simulation_paths)
 
@@ -155,14 +181,25 @@ def build_cost_fill_probability_view(
         "bid",
         metric_key,
         cost,
+        settings,
     )
     ask_near_edges, ask_opp_edges, ask_probability, ask_sample_count = _grid_for_side(
         arrays,
         "ask",
         metric_key,
         cost,
+        settings,
     )
-    shared_count_zmax = _shared_sample_count_zmax(bid_sample_count, ask_sample_count)
+    shared_count_zmax = (
+        settings.sample_count_range.max
+        if not settings.sample_count_range.auto
+        else _shared_sample_count_zmax(bid_sample_count, ask_sample_count)
+    )
+    count_zmin = (
+        settings.sample_count_range.min
+        if not settings.sample_count_range.auto
+        else 0.0
+    )
     metric_label = _metric_label(metric_key)
 
     figure = make_subplots(
@@ -185,13 +222,14 @@ def build_cost_fill_probability_view(
             bid_probability,
             "Viridis",
             name=f"Bid {metric_label} Fill Probability > Cost",
-            zmin=0.0,
-            zmax=1.0,
+            zmin=settings.metric_range.min,
+            zmax=settings.metric_range.max,
             colorbar_title="Fill Probability",
             showscale=True,
             colorbar_x=1.01,
             colorbar_y=0.79,
             colorbar_len=0.34,
+            use_log_bins=settings.axis.use_log_bins,
         ),
         row=1,
         col=1,
@@ -203,9 +241,10 @@ def build_cost_fill_probability_view(
             ask_probability,
             "Viridis",
             name=f"Ask {metric_label} Fill Probability > Cost",
-            zmin=0.0,
-            zmax=1.0,
+            zmin=settings.metric_range.min,
+            zmax=settings.metric_range.max,
             showscale=False,
+            use_log_bins=settings.axis.use_log_bins,
         ),
         row=1,
         col=2,
@@ -217,13 +256,14 @@ def build_cost_fill_probability_view(
             bid_sample_count,
             "Magma",
             name="Bid Sample Count",
-            zmin=0.0,
+            zmin=count_zmin,
             zmax=shared_count_zmax,
             colorbar_title="Sample Count",
             showscale=True,
             colorbar_x=1.01,
             colorbar_y=0.21,
             colorbar_len=0.34,
+            use_log_bins=settings.axis.use_log_bins,
         ),
         row=2,
         col=1,
@@ -235,9 +275,10 @@ def build_cost_fill_probability_view(
             ask_sample_count,
             "Magma",
             name="Ask Sample Count",
-            zmin=0.0,
+            zmin=count_zmin,
             zmax=shared_count_zmax,
             showscale=False,
+            use_log_bins=settings.axis.use_log_bins,
         ),
         row=2,
         col=2,
@@ -247,7 +288,7 @@ def build_cost_fill_probability_view(
         for col in (1, 2):
             figure.update_xaxes(title_text="Near Size", row=row, col=col)
             figure.update_yaxes(title_text="Opp Size", row=row, col=col)
-            if LOG_SPACED_BINS:
+            if settings.axis.use_log_bins:
                 figure.update_xaxes(type="log", row=row, col=col)
                 figure.update_yaxes(type="log", row=row, col=col)
             figure.update_xaxes(constrain="domain", row=row, col=col)
@@ -272,15 +313,21 @@ def build_cost_fill_probability_view(
 
 def build_mid_cost_fill_probability_view(
     locators: list[PlotDatasetLocator],
-    *,
-    cost: float,
+    render_options: PlotRenderOptions | None = None,
 ) -> go.Figure:
-    return build_cost_fill_probability_view(locators, "mid_profit", cost=cost)
+    return build_cost_fill_probability_view(
+        locators,
+        "mid_profit",
+        render_options=render_options,
+    )
 
 
 def build_micro_cost_fill_probability_view(
     locators: list[PlotDatasetLocator],
-    *,
-    cost: float,
+    render_options: PlotRenderOptions | None = None,
 ) -> go.Figure:
-    return build_cost_fill_probability_view(locators, "micro_profit", cost=cost)
+    return build_cost_fill_probability_view(
+        locators,
+        "micro_profit",
+        render_options=render_options,
+    )

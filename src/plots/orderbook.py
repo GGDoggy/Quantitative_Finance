@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .errors import PreprocessedDataError
+from .settings import PlotRenderOptions
 from src.preprocess.catalog import PlotDatasetLocator
 
 
@@ -219,7 +220,10 @@ def _merge_payloads(payloads: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
-def build_orderbook_view(locators: list[PlotDatasetLocator]):
+def build_orderbook_view(
+    locators: list[PlotDatasetLocator],
+    render_options: PlotRenderOptions | None = None,
+):
     payloads = [_load_orderbook_payload(locator) for locator in locators]
     merged = _merge_payloads(payloads)
     raw_time_axis = merged["time_axis"]
