@@ -20,6 +20,9 @@ from src.preprocess.catalog import (
 from src.simulation.constants import DEFAULT_RESOLVED_TIME
 
 
+SIMULATION_VIEWS = {"fill_probability", "mid_profit", "micro_profit"}
+
+
 def _write_orderbook_file(path: Path) -> None:
     np.savez_compressed(
         path,
@@ -168,6 +171,10 @@ def test_discovery_carries_simulation_metadata_and_fill_probability_filters(tmp_
     datasets = discover_preprocessed_datasets(tmp_path)
     simulation_datasets = [dataset for dataset in datasets if dataset.simulation_path is not None]
     assert len(simulation_datasets) == 4
+    assert all(
+        SIMULATION_VIEWS.issubset(set(dataset.available_views))
+        for dataset in simulation_datasets
+    )
 
     selected_dataset = next(
         dataset

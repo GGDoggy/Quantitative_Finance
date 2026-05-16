@@ -16,7 +16,13 @@ from src.plots.registry import PLOT_REGISTRY
 from src.simulation.constants import DEFAULT_RESOLVED_TIME
 
 
-SIMULATION_VIEW_KEY = "fill_probability"
+SIMULATION_VIEW_KEYS = (
+    "fill_probability",
+    "mid_profit",
+    "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+)
 
 
 RAW_LEVEL2_INIT_RE = re.compile(
@@ -340,7 +346,7 @@ def detect_available_views(
 
     if (
         dataset_hint is not None
-        and SIMULATION_VIEW_KEY in PLOT_REGISTRY
+        and any(view_key in PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
         and has_simulation_file(
             dataset_hint.preprocessed_dir,
             dataset_hint.product_id,
@@ -348,9 +354,15 @@ def detect_available_views(
             dataset_hint.time_step,
             dataset_hint.time_step_token,
         )
-        and SIMULATION_VIEW_KEY not in available_views
     ):
-        available_views = (*available_views, SIMULATION_VIEW_KEY)
+        available_views = _union_available_views(
+            available_views,
+            tuple(
+                view_key
+                for view_key in SIMULATION_VIEW_KEYS
+                if view_key in PLOT_REGISTRY
+            ),
+        )
 
     return available_views or ("orderbook",)
 
@@ -469,7 +481,11 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                     ),
                     available_views=_union_available_views(
                         base_views,
-                        (SIMULATION_VIEW_KEY,),
+                        tuple(
+                            view_key
+                            for view_key in SIMULATION_VIEW_KEYS
+                            if view_key in PLOT_REGISTRY
+                        ),
                     ),
                     time_step_token=time_step_token,
                     resolved_time=(

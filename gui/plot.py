@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 import math
 import sys
@@ -209,6 +210,17 @@ PRODUCT_PLACEHOLDER = "Select a product..."
 PLOT_PLACEHOLDER = "Select a plot..."
 TIMESTAMP_PLACEHOLDER = "Select a timestamp..."
 FILL_GROUP_PLACEHOLDER = "Select a simulation group..."
+SIMULATION_HEATMAP_PLOT_TYPES = {
+    "fill_probability",
+    "mid_profit",
+    "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+}
+COST_FILTERED_PLOT_TYPES = {
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+}
 
 
 class OrderbookDashboard:
@@ -278,6 +290,13 @@ class OrderbookDashboard:
             visible=False,
             disabled=True,
         )
+        self.cost_input = pn.widgets.TextInput(
+            name="Cost",
+            value="0",
+            placeholder="Enter a finite cost value",
+            sizing_mode="stretch_width",
+            visible=False,
+        )
         self.refresh_button = pn.widgets.Button(
             name="Refresh Catalog",
             button_type="default",
@@ -345,6 +364,7 @@ class OrderbookDashboard:
         self.plot_select.param.watch(self._handle_plot_change, "value")
         self.timestamp_select.param.watch(self._handle_timestamp_change, "value")
         self.fill_group_select.param.watch(self._handle_fill_group_change, "value")
+        self.cost_input.param.watch(self._handle_cost_change, "value")
 
         self.refresh_catalog()
 
@@ -616,7 +636,8 @@ class OrderbookDashboard:
             (
                 view
                 for view in dataset.available_views
-                if view in PLOT_REGISTRY and view != "fill_probability"
+                if view in PLOT_REGISTRY
+                and view not in SIMULATION_HEATMAP_PLOT_TYPES
             ),
             next(
                 (view for view in dataset.available_views if view in PLOT_REGISTRY),
@@ -657,9 +678,12 @@ class OrderbookDashboard:
                     self.timestamp_select.value = dataset_key
             finally:
                 self._updating_controls = False
-        elif preferred_plot_type == "fill_probability":
-            group_value = self._fill_probability_group_value(
-                self._fill_probability_group_key(dataset)
+        elif (
+            preferred_plot_type is not None
+            and preferred_plot_type in SIMULATION_HEATMAP_PLOT_TYPES
+        ):
+            group_value = self._simulation_group_value(
+                self._simulation_group_key(dataset)
             )
             if group_value in set(self.fill_group_select.options.values()):
                 self._updating_controls = True
@@ -690,6 +714,12 @@ class OrderbookDashboard:
         if self._updating_controls:
             return
         self._render_plots()
+
+    def _handle_cost_change(self, _event) -> None:
+        if self._updating_controls:
+            return
+        if self._selected_plot_type() in COST_FILTERED_PLOT_TYPES:
+            self._render_plots()
 
     def _handle_raw_selection_change(self, _event) -> None:
         self._update_raw_summary()
@@ -739,10 +769,10 @@ class OrderbookDashboard:
     def _sync_timestamp_options(self, *, render: bool) -> None:
         product_id = self._selected_product()
         plot_type = self._selected_plot_type()
-        is_fill_probability = plot_type == "fill_probability"
+        is_simulation_heatmap = plot_type in SIMULATION_HEATMAP_PLOT_TYPES
         timestamp_options = (
             self._available_timestamp_options(product_id, plot_type)
-            if product_id and plot_type and not is_fill_probability
+            if product_id and plot_type and not is_simulation_heatmap
             else {}
         )
         timestamp_select_options = self._with_placeholder_options(
@@ -756,10 +786,10 @@ class OrderbookDashboard:
 
         self._updating_controls = True
         try:
-            if self.timestamp_select.visible == is_fill_probability:
-                self.timestamp_select.visible = not is_fill_probability
-            if self.timestamp_select.disabled != is_fill_probability:
-                self.timestamp_select.disabled = is_fill_probability
+            if self.timestamp_select.visible == is_simulation_heatmap:
+                self.timestamp_select.visible = not is_simulation_heatmap
+            if self.timestamp_select.disabled != is_simulation_heatmap:
+                self.timestamp_select.disabled = is_simulation_heatmap
             if self.timestamp_select.options != timestamp_select_options:
                 self.timestamp_select.options = timestamp_select_options
             if self.timestamp_select.value != next_timestamp:
@@ -774,10 +804,10 @@ class OrderbookDashboard:
     def _sync_fill_group_options(self, *, render: bool) -> None:
         product_id = self._selected_product()
         plot_type = self._selected_plot_type()
-        is_fill_probability = plot_type == "fill_probability"
+        is_simulation_heatmap = plot_type in SIMULATION_HEATMAP_PLOT_TYPES
         group_options = (
-            self._available_fill_group_options(product_id)
-            if product_id and is_fill_probability
+            self._available_simulation_group_options(product_id)
+            if product_id and is_simulation_heatmap
             else {}
         )
         fill_group_select_options = self._with_placeholder_options(
@@ -789,30 +819,64 @@ class OrderbookDashboard:
 
         self._updating_controls = True
         try:
-            if self.fill_group_select.visible != is_fill_probability:
-                self.fill_group_select.visible = is_fill_probability
-            next_disabled = not is_fill_probability
+            if self.fill_group_select.visible != is_simulation_heatmap:
+                self.fill_group_select.visible = is_simulation_heatmap
+            next_disabled = not is_simulation_heatmap
             if self.fill_group_select.disabled != next_disabled:
                 self.fill_group_select.disabled = next_disabled
             if self.fill_group_select.options != fill_group_select_options:
                 self.fill_group_select.options = fill_group_select_options
             if self.fill_group_select.value != next_group:
                 self.fill_group_select.value = next_group
+            self._sync_cost_input(render=False)
         finally:
             self._updating_controls = False
 
         if render:
             self._render_plots()
 
+    def _sync_cost_input(self, *, render: bool) -> None:
+        show_cost_input = self._selected_plot_type() in COST_FILTERED_PLOT_TYPES
+
+        self._updating_controls = True
+        try:
+            if self.cost_input.visible != show_cost_input:
+                self.cost_input.visible = show_cost_input
+            if self.cost_input.disabled == show_cost_input:
+                self.cost_input.disabled = not show_cost_input
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
+
+    def _selected_cost(self) -> float:
+        raw_value = self.cost_input.value.strip()
+        if not raw_value:
+            raise ValueError("Cost is required for cost-filtered fill probability plots.")
+
+        try:
+            cost = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"Cost must be a finite number: {raw_value!r}") from exc
+
+        if not math.isfinite(cost):
+            raise ValueError(f"Cost must be a finite number: {raw_value!r}")
+
+        return cost
+
     def _build_plot_pane(
         self, plot_type: str, locators: list[PlotDatasetLocator]
     ) -> pn.viewable.Viewable:
         builder = PLOT_REGISTRY[plot_type].plot_builder
-        plot = builder(locators)
+        if plot_type in COST_FILTERED_PLOT_TYPES:
+            plot = builder(locators, cost=self._selected_cost())
+        else:
+            plot = builder(locators)
         if isinstance(plot, Figure):
             themed_plot = Figure(plot)
             themed_plot.update_layout(**PLOTLY_DARK_LAYOUT)
-            plot_height = 1560 if plot_type == "fill_probability" else 560
+            plot_height = 1560 if plot_type in SIMULATION_HEATMAP_PLOT_TYPES else 560
             return pn.pane.Plotly(
                 themed_plot,
                 config={"responsive": True},
@@ -912,14 +976,14 @@ class OrderbookDashboard:
             options[label] = self._dataset_selection_key(dataset)
         return options
 
-    def _fill_probability_group_value(
+    def _simulation_group_value(
         self, group_key: tuple[str, float, str | None, str]
     ) -> str:
         product_id, time_step, time_step_token, signature = group_key
         token = time_step_token or format_time_step(time_step)
         return "|".join((product_id, token, signature))
 
-    def _fill_probability_group_label(
+    def _simulation_group_label(
         self,
         group_key: tuple[str, float, str | None, str],
         group: list[PreprocessedDataset],
@@ -939,18 +1003,21 @@ class OrderbookDashboard:
             f"{timestamp_count} timestamp(s), {simulation_count} simulation file(s)"
         )
 
-    def _available_fill_group_options(self, product_id: str) -> dict[str, str]:
-        fill_datasets = [
+    def _available_simulation_group_options(self, product_id: str) -> dict[str, str]:
+        simulation_datasets = [
             dataset
             for dataset in self._datasets_for_product(product_id)
-            if "fill_probability" in dataset.available_views
+            if any(
+                view in dataset.available_views
+                for view in SIMULATION_HEATMAP_PLOT_TYPES
+            )
             and dataset.simulation_path is not None
         ]
-        groups = self._fill_probability_groups(fill_datasets)
+        groups = self._simulation_groups(simulation_datasets)
         return {
-            self._fill_probability_group_label(
-                group_key, group
-            ): self._fill_probability_group_value(group_key)
+            self._simulation_group_label(group_key, group): self._simulation_group_value(
+                group_key
+            )
             for group_key, group in sorted(groups.items())
         }
 
@@ -963,7 +1030,7 @@ class OrderbookDashboard:
         signature = file_name.replace(dataset.timestamp, "")
         return signature.strip("-_. ") or "simulation-parameters-unrecognized"
 
-    def _fill_probability_group_key(
+    def _simulation_group_key(
         self, dataset: PreprocessedDataset
     ) -> tuple[str, float, str | None, str]:
         return (
@@ -973,12 +1040,12 @@ class OrderbookDashboard:
             self._simulation_parameter_signature(dataset),
         )
 
-    def _fill_probability_groups(
+    def _simulation_groups(
         self, datasets: list[PreprocessedDataset]
     ) -> dict[tuple[str, float, str | None, str], list[PreprocessedDataset]]:
         groups: dict[tuple[str, float, str | None, str], list[PreprocessedDataset]] = {}
         for dataset in datasets:
-            groups.setdefault(self._fill_probability_group_key(dataset), []).append(
+            groups.setdefault(self._simulation_group_key(dataset), []).append(
                 dataset
             )
         return {
@@ -993,7 +1060,7 @@ class OrderbookDashboard:
             return []
 
         product_datasets = self._datasets_for_product(product_id)
-        if plot_type == "fill_probability":
+        if plot_type in SIMULATION_HEATMAP_PLOT_TYPES:
             selected_group = self.fill_group_select.value
             if not selected_group:
                 return []
@@ -1002,9 +1069,7 @@ class OrderbookDashboard:
                 for dataset in product_datasets
                 if plot_type in dataset.available_views
                 and dataset.simulation_path is not None
-                and self._fill_probability_group_value(
-                    self._fill_probability_group_key(dataset)
-                )
+                and self._simulation_group_value(self._simulation_group_key(dataset))
                 == selected_group
             ]
             return sorted(selected_datasets, key=lambda dataset: dataset.timestamp)
@@ -1053,8 +1118,8 @@ class OrderbookDashboard:
         ]
         selected_datasets = self._selected_datasets_for_plot()
 
-        if plot_type == "fill_probability":
-            groups = self._fill_probability_groups(selected_datasets)
+        if plot_type in SIMULATION_HEATMAP_PLOT_TYPES:
+            groups = self._simulation_groups(selected_datasets)
             group_lines = []
             for (
                 _product,
@@ -1226,7 +1291,7 @@ class OrderbookDashboard:
         )
         result_classes = ["qf-plot-result"]
         card_classes = ["qf-main-plot-card", *(css_classes or [])]
-        if plot_type == "fill_probability":
+        if plot_type in SIMULATION_HEATMAP_PLOT_TYPES:
             result_classes.append("qf-fill-probability-result")
             card_classes.append("qf-fill-probability-card")
         result_container = pn.Column(
@@ -1325,10 +1390,11 @@ class OrderbookDashboard:
                 "warning",
             )
 
-        if plot_type == "fill_probability":
+        if plot_type in SIMULATION_HEATMAP_PLOT_TYPES:
             if not self._selectable_option_values(self.fill_group_select.options):
+                plot_label = self._plot_label_for_type(plot_type)
                 return self._empty_state(
-                    "Fill Probability cannot be rendered because no mergeable "
+                    f"{plot_label} cannot be rendered because no mergeable "
                     f"simulation datasets were found for `{product_id}`.",
                     "warning",
                 )
@@ -1505,15 +1571,21 @@ class OrderbookDashboard:
         )
 
     def build_plot_section(self) -> pn.Column:
-        is_fill_probability = self._selected_plot_type() == "fill_probability"
-        self.timestamp_select.visible = not is_fill_probability
-        self.timestamp_select.disabled = is_fill_probability
-        self.fill_group_select.visible = is_fill_probability
-        self.fill_group_select.disabled = not is_fill_probability
+        is_simulation_heatmap = (
+            self._selected_plot_type() in SIMULATION_HEATMAP_PLOT_TYPES
+        )
+        show_cost_input = self._selected_plot_type() in COST_FILTERED_PLOT_TYPES
+        self.timestamp_select.visible = not is_simulation_heatmap
+        self.timestamp_select.disabled = is_simulation_heatmap
+        self.fill_group_select.visible = is_simulation_heatmap
+        self.fill_group_select.disabled = not is_simulation_heatmap
+        self.cost_input.visible = show_cost_input
+        self.cost_input.disabled = not show_cost_input
         plot_controls = self._card(
             self.plot_select,
             self.timestamp_select,
             self.fill_group_select,
+            self.cost_input,
             title="Plot controls",
             css_classes=["qf-plot-controls"],
         )
