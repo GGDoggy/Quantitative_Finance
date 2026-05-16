@@ -34,6 +34,9 @@ def _simulation_path(locator: PlotDatasetLocator) -> Path:
         locator.timestamp,
         locator.time_step,
         locator.time_step_token,
+        locator.resolved_time,
+        locator.resolved_time_token,
+        locator.algorithm_name,
     )
 
     if not candidates:
@@ -45,7 +48,9 @@ def _simulation_path(locator: PlotDatasetLocator) -> Path:
         candidate_names = ", ".join(path.name for path in candidates)
         raise FileExistsError(
             f"Multiple fill probability simulation files found for "
-            f"{locator.base_id}: {candidate_names}"
+            f"{locator.base_id}. Specify a single simulation output with "
+            f"resolved_time/algorithm metadata or choose an explicit simulation file: "
+            f"{candidate_names}"
         )
 
     return candidates[0]

@@ -10,6 +10,9 @@ class PlotDatasetLocator(Protocol):
     timestamp: str
     time_step: float
     time_step_token: str | None
+    resolved_time: float | None
+    resolved_time_token: str | None
+    algorithm_name: str | None
     preprocessed_dir: Path
     simulation_path: Path | None
 

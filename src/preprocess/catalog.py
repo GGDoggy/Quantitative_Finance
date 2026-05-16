@@ -13,6 +13,7 @@ import numpy as np
 
 from src.plots.errors import PreprocessedDataError
 from src.plots.registry import PLOT_REGISTRY
+from src.simulation.constants import DEFAULT_RESOLVED_TIME
 
 
 SIMULATION_VIEW_KEY = "fill_probability"
@@ -32,8 +33,21 @@ PREPROCESSED_RE = re.compile(
 )
 SIMULATION_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
-    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT}).*simulation.*\.npz$"
+    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})"
+    rf"(?:-resolved-(?P<resolved_time>{TIME_STEP_RE_FRAGMENT}))?"
+    r"-simulation-(?P<algorithm>.+)\.npz$"
 )
+
+
+@dataclass(frozen=True)
+class SimulationFileMetadata:
+    product_id: str
+    timestamp: str
+    time_step: float
+    time_step_token: str
+    resolved_time: float | None
+    resolved_time_token: str | None
+    algorithm_name: str
 
 
 def format_time_step(time_step: float | str | Decimal) -> str:
@@ -63,29 +77,111 @@ def _simulation_time_step_tokens(
     return tuple(tokens)
 
 
+def _simulation_value_tokens(
+    value: float | None,
+    value_token: str | None = None,
+) -> tuple[str, ...]:
+    if value is None:
+        return ()
+
+    try:
+        decimal_value = Decimal(str(value))
+    except InvalidOperation as error:
+        raise ValueError(f"Invalid resolved time: {value!r}") from error
+
+    if not decimal_value.is_finite() or decimal_value < 0:
+        raise ValueError(f"Resolved time must be a non-negative finite value: {value!r}")
+
+    normalized_value = decimal_value.normalize()
+    if normalized_value == normalized_value.to_integral():
+        formatted_value = format(normalized_value, "f")
+    else:
+        formatted_value = format(normalized_value, "f").rstrip("0").rstrip(".")
+
+    tokens: list[str] = []
+    for token in (value_token, formatted_value, str(value)):
+        if token is not None and token not in tokens:
+            tokens.append(token)
+    return tuple(tokens)
+
+
+def _matches_resolved_time(
+    metadata_resolved_time: float | None,
+    metadata_resolved_time_token: str | None,
+    resolved_time: float | None,
+    resolved_time_tokens: set[str],
+) -> bool:
+    if resolved_time is None:
+        return True
+
+    if metadata_resolved_time is None:
+        return resolved_time == DEFAULT_RESOLVED_TIME
+
+    return (
+        metadata_resolved_time_token in resolved_time_tokens
+        or metadata_resolved_time == resolved_time
+    )
+
+
+def parse_simulation_filename(filename: str) -> SimulationFileMetadata | None:
+    match = SIMULATION_RE.match(filename)
+    if not match:
+        return None
+
+    resolved_time_token = match.group("resolved_time")
+    return SimulationFileMetadata(
+        product_id=match.group("product_id"),
+        timestamp=match.group("timestamp"),
+        time_step=float(match.group("time_step")),
+        time_step_token=match.group("time_step"),
+        resolved_time=float(resolved_time_token) if resolved_time_token is not None else None,
+        resolved_time_token=resolved_time_token,
+        algorithm_name=match.group("algorithm"),
+    )
+
+
 def find_simulation_files(
     preprocessed_dir: Path,
     product_id: str,
     timestamp: str,
     time_step: float,
     time_step_token: str | None = None,
+    resolved_time: float | None = None,
+    resolved_time_token: str | None = None,
+    algorithm_name: str | None = None,
 ) -> tuple[Path, ...]:
     candidates: list[Path] = []
     time_step_tokens = set(_simulation_time_step_tokens(time_step, time_step_token))
+    resolved_time_tokens = set(_simulation_value_tokens(resolved_time, resolved_time_token))
 
     for file_path in _iter_files(preprocessed_dir, ".npz"):
-        match = SIMULATION_RE.match(file_path.name)
-        if not match:
+        metadata = parse_simulation_filename(file_path.name)
+        if metadata is None:
             continue
         if (
-            match.group("product_id") != product_id
-            or match.group("timestamp") != timestamp
+            metadata.product_id != product_id
+            or metadata.timestamp != timestamp
         ):
             continue
 
-        matched_time_step = match.group("time_step")
-        if matched_time_step in time_step_tokens or float(matched_time_step) == time_step:
-            candidates.append(file_path)
+        if not (
+            metadata.time_step_token in time_step_tokens
+            or metadata.time_step == time_step
+        ):
+            continue
+
+        if algorithm_name is not None and metadata.algorithm_name != algorithm_name:
+            continue
+
+        if not _matches_resolved_time(
+            metadata.resolved_time,
+            metadata.resolved_time_token,
+            resolved_time,
+            resolved_time_tokens,
+        ):
+            continue
+
+        candidates.append(file_path)
 
     return tuple(sorted(candidates))
 
@@ -139,6 +235,9 @@ class PlotDatasetLocator:
     time_step: float
     preprocessed_dir: Path
     time_step_token: str | None = None
+    resolved_time: float | None = None
+    resolved_time_token: str | None = None
+    algorithm_name: str | None = None
     original_path: Path | None = None
     simulation_path: Path | None = None
     payload_cache: MutableMapping[Path, dict[str, object]] | None = field(
@@ -168,6 +267,9 @@ class PreprocessedDataset:
     path: Path
     available_views: tuple[str, ...]
     time_step_token: str | None = None
+    resolved_time: float | None = None
+    resolved_time_token: str | None = None
+    algorithm_name: str | None = None
     simulation_path: Path | None = None
 
     @property
@@ -201,6 +303,9 @@ class PreprocessedDataset:
             time_step=self.time_step,
             preprocessed_dir=preprocessed_dir,
             time_step_token=self.time_step_token,
+            resolved_time=self.resolved_time,
+            resolved_time_token=self.resolved_time_token,
+            algorithm_name=self.algorithm_name,
             original_path=self.path,
             simulation_path=self.simulation_path,
             payload_cache=payload_cache,
@@ -268,15 +373,22 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
 
     for file_path in _iter_files(preprocessed_dir, ".npz"):
         preprocessed_match = PREPROCESSED_RE.match(file_path.name)
-        simulation_match = SIMULATION_RE.match(file_path.name)
-        match = preprocessed_match or simulation_match
-        if not match:
+        simulation_metadata = parse_simulation_filename(file_path.name)
+        simulation_match = simulation_metadata is not None
+        if not preprocessed_match and not simulation_match:
             continue
 
-        product_id = match.group("product_id")
-        timestamp = match.group("timestamp")
-        time_step = float(match.group("time_step"))
-        time_step_token = match.group("time_step")
+        if preprocessed_match:
+            product_id = preprocessed_match.group("product_id")
+            timestamp = preprocessed_match.group("timestamp")
+            time_step = float(preprocessed_match.group("time_step"))
+            time_step_token = preprocessed_match.group("time_step")
+        else:
+            assert simulation_metadata is not None
+            product_id = simulation_metadata.product_id
+            timestamp = simulation_metadata.timestamp
+            time_step = simulation_metadata.time_step
+            time_step_token = simulation_metadata.time_step_token
         key = (product_id, timestamp, time_step)
         entry = entries.setdefault(
             key,
@@ -287,6 +399,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                 "time_step_token": time_step_token,
                 "orderbook_path": None,
                 "simulation_paths": [],
+                "simulation_metadata": {},
                 "orderbook_views": (),
             },
         )
@@ -314,6 +427,9 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         simulation_paths = entry["simulation_paths"]
         if isinstance(simulation_paths, list):
             simulation_paths.append(file_path)
+        simulation_metadata_by_name = entry["simulation_metadata"]
+        if isinstance(simulation_metadata_by_name, dict) and simulation_metadata is not None:
+            simulation_metadata_by_name[file_path.name] = simulation_metadata
 
     datasets: list[PreprocessedDataset] = []
     for entry in entries.values():
@@ -321,6 +437,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         simulation_paths = sorted(
             path for path in entry["simulation_paths"] if isinstance(path, Path)
         )
+        simulation_metadata_by_name = entry["simulation_metadata"]
         orderbook_views = tuple(entry["orderbook_views"])
         time_step_token = str(entry["time_step_token"])
 
@@ -338,6 +455,9 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
             continue
 
         for simulation_path in simulation_paths:
+            simulation_metadata = None
+            if isinstance(simulation_metadata_by_name, dict):
+                simulation_metadata = simulation_metadata_by_name.get(simulation_path.name)
             base_views = orderbook_views if isinstance(orderbook_path, Path) else ()
             datasets.append(
                 PreprocessedDataset(
@@ -352,6 +472,21 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                         (SIMULATION_VIEW_KEY,),
                     ),
                     time_step_token=time_step_token,
+                    resolved_time=(
+                        simulation_metadata.resolved_time
+                        if isinstance(simulation_metadata, SimulationFileMetadata)
+                        else None
+                    ),
+                    resolved_time_token=(
+                        simulation_metadata.resolved_time_token
+                        if isinstance(simulation_metadata, SimulationFileMetadata)
+                        else None
+                    ),
+                    algorithm_name=(
+                        simulation_metadata.algorithm_name
+                        if isinstance(simulation_metadata, SimulationFileMetadata)
+                        else None
+                    ),
                     simulation_path=simulation_path,
                 )
             )

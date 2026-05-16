@@ -665,6 +665,15 @@ def compute_evolved_metrics(orders, quote_timeline, resolved_time, order_side):
     )
 
 
+def compute_quote_buffer_end(order_groups, simulation_end, resolved_time):
+    max_fill_time = float(simulation_end)
+    for orders in order_groups:
+        for order in orders:
+            if order.result == 1 and np.isfinite(order.fill_time):
+                max_fill_time = max(max_fill_time, float(order.fill_time))
+    return max_fill_time + max(resolved_time, 0.0)
+
+
 def append_quote_timeline_updates(
     quote_timeline,
     events,
@@ -852,6 +861,10 @@ def simulate_virtual_best_orders(
             ) = events[event_index]
             event_index += 1
 
+            if event_time > simulation_end:
+                event_index -= 1
+                break
+
             best_bid_price, best_bid_size, best_ask_price, best_ask_size = get_best_levels_from_indices(
                 orderbook,
                 price_levels,
@@ -893,12 +906,12 @@ def simulate_virtual_best_orders(
             previous_ask_index = best_ask_index
 
             updated_index, _updated_value = update_orderbook(
-            orderbook,
-            price_levels,
-            event_price,
-            event_volume,
-            event_side,
-        )
+                orderbook,
+                price_levels,
+                event_price,
+                event_volume,
+                event_side,
+            )
             best_bid_index = advance_best_bid_index(orderbook, updated_index, best_bid_index)
             best_ask_index = advance_best_ask_index(orderbook, updated_index, best_ask_index)
 
@@ -1022,6 +1035,11 @@ def simulate_virtual_best_orders(
             order.ahead = max(order.ahead, 0.0)
             order.behind = max(order.behind, 0.0)
 
+    quote_buffer_end = compute_quote_buffer_end(
+        (bid_orders, ask_orders),
+        simulation_end,
+        resolved_time,
+    )
     append_quote_timeline_updates(
         quote_timeline,
         events,
@@ -1030,7 +1048,7 @@ def simulate_virtual_best_orders(
         price_levels,
         best_bid_index,
         best_ask_index,
-        simulation_end + max(resolved_time, 0.0),
+        quote_buffer_end,
     )
 
     bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time, "bid")

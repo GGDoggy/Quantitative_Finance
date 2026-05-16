@@ -7,6 +7,7 @@ from .time_averaged_random_cancellation import (
     append_trade_evidence,
     append_quote_timeline_updates,
     build_event_stream,
+    compute_quote_buffer_end,
     compute_bid_ask_spread,
     create_virtual_order,
     debug_best_state,
@@ -315,9 +316,9 @@ def simulate_virtual_best_orders(
                     event_time=event_time,
                     event_type="submit",
                 )
+                spread = compute_bid_ask_spread(current_bid_price, current_ask_price)
 
             if active_bid_order is None:
-                spread = compute_bid_ask_spread(current_bid_price, current_ask_price)
                 active_bid_order = create_virtual_order(
                     current_bid_size,
                     current_ask_size,
@@ -388,6 +389,11 @@ def simulate_virtual_best_orders(
     _clamp_unresolved_orders(bid_orders)
     _clamp_unresolved_orders(ask_orders)
 
+    quote_buffer_end = compute_quote_buffer_end(
+        (bid_orders, ask_orders),
+        simulation_end,
+        resolved_time,
+    )
     append_quote_timeline_updates(
         quote_timeline,
         events,
@@ -396,7 +402,7 @@ def simulate_virtual_best_orders(
         price_levels,
         best_bid_index,
         best_ask_index,
-        simulation_end + max(resolved_time, 0.0),
+        quote_buffer_end,
     )
 
     bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time, "bid")
