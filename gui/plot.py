@@ -226,6 +226,7 @@ class OrderbookDashboard:
     def __init__(self, raw_dir: Path, preprocessed_dir: Path) -> None:
         self.raw_dir = raw_dir
         self.preprocessed_dir = preprocessed_dir
+        self._raw_dir_input_value = self._display_raw_dir(raw_dir)
         self.preprocessed_by_label: dict[str, PreprocessedDataset] = {}
         self.preprocessed_datasets: list[PreprocessedDataset] = []
         self.raw_by_label: dict[str, RawBatch] = {}
@@ -238,6 +239,17 @@ class OrderbookDashboard:
             name="Product",
             options=[],
             sizing_mode="stretch_width",
+        )
+        self.raw_dir_input = pn.widgets.TextInput(
+            name="Raw data directory",
+            value=self._raw_dir_input_value,
+            placeholder="data/v3 or D:\\market\\raw",
+            sizing_mode="stretch_width",
+        )
+        self.apply_raw_dir_button = pn.widgets.Button(
+            name="Apply Raw Path",
+            button_type="default",
+            width=170,
         )
         self.raw_select = pn.widgets.MultiChoice(
             name="Raw batches pending preprocess",
@@ -360,6 +372,7 @@ class OrderbookDashboard:
         )
 
         self.refresh_button.on_click(self._handle_refresh)
+        self.apply_raw_dir_button.on_click(self._handle_apply_raw_dir)
         self.preprocess_button.on_click(self._handle_preprocess)
         self.simulation_select_all_button.on_click(self._handle_simulation_select_all)
         self.simulation_clear_selection_button.on_click(
@@ -430,13 +443,56 @@ class OrderbookDashboard:
         self._sync_simulation_parameter_visibility()
         self._render_plots()
 
+    def _resolve_raw_dir(self, raw_dir_value: str) -> Path:
+        candidate = Path(raw_dir_value.strip()).expanduser()
+        if not candidate.is_absolute():
+            candidate = (PROJECT_ROOT / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+
+        if not candidate.exists():
+            raise ValueError(f"Raw data directory does not exist: {candidate}")
+        if not candidate.is_dir():
+            raise ValueError(f"Raw data directory is not a directory: {candidate}")
+        return candidate
+
+    def _display_raw_dir(self, raw_dir: Path) -> str:
+        try:
+            return str(raw_dir.resolve().relative_to(PROJECT_ROOT))
+        except ValueError:
+            return str(raw_dir.resolve())
+
     def _set_status(self, message: str, level: str = "light") -> None:
         self.status.object = message
         self.status.alert_type = level
 
     def _handle_refresh(self, _event) -> None:
         self.refresh_catalog()
-        self._set_status("Catalog refreshed.", "success")
+        self._set_status(
+            f"Catalog refreshed from raw directory: {self.raw_dir}", "success"
+        )
+
+    def _handle_apply_raw_dir(self, _event) -> None:
+        raw_dir_value = self.raw_dir_input.value.strip()
+        if not raw_dir_value:
+            self.raw_dir_input.value = self._raw_dir_input_value
+            self._set_status("Raw data directory is required.", "danger")
+            return
+
+        try:
+            next_raw_dir = self._resolve_raw_dir(raw_dir_value)
+        except ValueError as error:
+            self.raw_dir_input.value = self._raw_dir_input_value
+            self._set_status(str(error), "danger")
+            return
+
+        self.raw_dir = next_raw_dir
+        self._raw_dir_input_value = self._display_raw_dir(next_raw_dir)
+        self.raw_dir_input.value = self._raw_dir_input_value
+        self.refresh_catalog()
+        self._set_status(
+            f"Raw data directory updated to: {self.raw_dir}", "success"
+        )
 
     def _set_preprocess_loading(self, is_loading: bool) -> None:
         self.preprocess_button.disabled = is_loading
@@ -1208,6 +1264,7 @@ class OrderbookDashboard:
         )
         if pending_count == 0 and discovered_count == 0:
             self.raw_summary.object = (
+                f"**Raw data directory:** `{self.raw_dir}`\n\n"
                 "**Pending raw batch count:** 0\n\n"
                 "**Selected preprocess batch count:** 0\n\n"
                 "**Discovered raw batch count:** 0\n\n"
@@ -1217,6 +1274,7 @@ class OrderbookDashboard:
             return
 
         self.raw_summary.object = (
+            f"**Raw data directory:** `{self.raw_dir}`\n\n"
             f"**Pending raw batch count:** {pending_count}\n\n"
             f"**Selected preprocess batch count:** {preprocess_selected_count}\n\n"
             f"**Discovered raw batch count:** {discovered_count}\n\n"
@@ -1542,6 +1600,8 @@ class OrderbookDashboard:
     def build_dataset_section(self) -> pn.Card:
         return self._card(
             self.product_select,
+            self.raw_dir_input,
+            self.apply_raw_dir_button,
             self.dataset_summary,
             title="Dataset selection",
         )
