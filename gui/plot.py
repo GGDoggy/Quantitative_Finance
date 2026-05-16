@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 import sys
 
 if __package__ is None or __package__ == "":
@@ -14,11 +15,19 @@ from src.plots import PLOT_LABELS, PLOT_REGISTRY
 from src.preprocess import (
     PlotDatasetLocator,
     PreprocessedDataset,
+    RawBatch,
     discover_preprocessed_datasets,
     discover_raw_batches,
     format_time_step,
     parse_timestamp,
     preprocess_batches,
+)
+from src.simulation import (
+    DEFAULT_RESOLVED_TIME,
+    DEFAULT_TIME_STEP as DEFAULT_SIMULATION_TIME_STEP,
+    TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
+    get_algorithm_names,
+    simulate_batches,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -208,7 +217,8 @@ class OrderbookDashboard:
         self.preprocessed_dir = preprocessed_dir
         self.preprocessed_by_label: dict[str, PreprocessedDataset] = {}
         self.preprocessed_datasets: list[PreprocessedDataset] = []
-        self.raw_by_label = {}
+        self.raw_by_label: dict[str, RawBatch] = {}
+        self.all_raw_by_label: dict[str, RawBatch] = {}
         self._updating_controls = False
         self.status = pn.pane.Alert(
             "Ready.", alert_type="light", sizing_mode="stretch_width"
@@ -223,6 +233,33 @@ class OrderbookDashboard:
             options=[],
             sizing_mode="stretch_width",
             min_height=180,
+        )
+        self.simulation_raw_select = pn.widgets.MultiChoice(
+            name="Raw batches for simulation",
+            options=[],
+            sizing_mode="stretch_width",
+            min_height=180,
+        )
+        self.simulation_algorithm_select = pn.widgets.Select(
+            name="Simulation algorithm",
+            options=get_algorithm_names(),
+            value=(get_algorithm_names()[0] if get_algorithm_names() else None),
+            sizing_mode="stretch_width",
+        )
+        self.simulation_resolved_time_input = pn.widgets.FloatInput(
+            name="Resolved time",
+            value=DEFAULT_RESOLVED_TIME,
+            step=0.1,
+            start=0,
+            sizing_mode="stretch_width",
+        )
+        self.simulation_time_step_input = pn.widgets.FloatInput(
+            name="Simulation time step",
+            value=DEFAULT_SIMULATION_TIME_STEP,
+            step=0.01,
+            start=0.00000001,
+            sizing_mode="stretch_width",
+            visible=False,
         )
         self.plot_select = pn.widgets.Select(
             name="Plot",
@@ -270,6 +307,22 @@ class OrderbookDashboard:
             "No preprocess job running.",
             sizing_mode="stretch_width",
         )
+        self.simulation_button = pn.widgets.Button(
+            name="Run Simulation",
+            button_type="primary",
+            sizing_mode="stretch_width",
+        )
+        self.simulation_spinner = pn.indicators.LoadingSpinner(
+            value=False,
+            width=24,
+            height=24,
+            color="primary",
+            visible=False,
+        )
+        self.simulation_progress = pn.pane.Markdown(
+            "No simulation job running.",
+            sizing_mode="stretch_width",
+        )
         self.plot_area = pn.Column(
             pn.pane.Markdown(
                 "Select a product, plot, and timestamp to start plotting."
@@ -280,8 +333,15 @@ class OrderbookDashboard:
 
         self.refresh_button.on_click(self._handle_refresh)
         self.preprocess_button.on_click(self._handle_preprocess)
+        self.simulation_button.on_click(self._handle_simulation)
         self.product_select.param.watch(self._handle_product_change, "value")
         self.raw_select.param.watch(self._handle_raw_selection_change, "value")
+        self.simulation_algorithm_select.param.watch(
+            self._handle_simulation_algorithm_change, "value"
+        )
+        self.simulation_raw_select.param.watch(
+            self._handle_simulation_raw_selection_change, "value"
+        )
         self.plot_select.param.watch(self._handle_plot_change, "value")
         self.timestamp_select.param.watch(self._handle_timestamp_change, "value")
         self.fill_group_select.param.watch(self._handle_fill_group_change, "value")
@@ -295,6 +355,9 @@ class OrderbookDashboard:
         self.preprocessed_by_label = {
             dataset.display_name: dataset for dataset in datasets
         }
+        self.all_raw_by_label = {
+            batch.display_name: batch for batch in batches
+        }
         self.raw_by_label = {
             batch.display_name: batch for batch in batches if not batch.is_preprocessed
         }
@@ -304,6 +367,13 @@ class OrderbookDashboard:
         ]
         self.raw_select.options = list(self.raw_by_label.keys())
         self.raw_select.value = existing_raw
+        existing_simulation_raw = [
+            label
+            for label in self.simulation_raw_select.value
+            if label in self.all_raw_by_label
+        ]
+        self.simulation_raw_select.options = list(self.all_raw_by_label.keys())
+        self.simulation_raw_select.value = existing_simulation_raw
 
         previous_product = self._selected_product()
         product_options = self._available_products()
@@ -324,6 +394,7 @@ class OrderbookDashboard:
             self._updating_controls = False
 
         self._update_raw_summary()
+        self._sync_simulation_parameter_visibility()
         self._render_plots()
 
     def _set_status(self, message: str, level: str = "light") -> None:
@@ -341,6 +412,13 @@ class OrderbookDashboard:
         self.preprocess_spinner.visible = is_loading
         self.preprocess_progress.loading = is_loading
 
+    def _set_simulation_loading(self, is_loading: bool) -> None:
+        self.simulation_button.disabled = is_loading
+        self.simulation_button.loading = is_loading
+        self.simulation_spinner.value = is_loading
+        self.simulation_spinner.visible = is_loading
+        self.simulation_progress.loading = is_loading
+
     def _format_preprocess_progress(
         self, batch_count: int, progress_messages: list[str]
     ) -> str:
@@ -351,6 +429,26 @@ class OrderbookDashboard:
             f"**Processing batch count:** {batch_count}\n\n"
             f"**Progress**\n{progress_lines}"
         )
+
+    def _format_simulation_progress(
+        self, batch_count: int, progress_messages: list[str]
+    ) -> str:
+        progress_lines = "\n".join(
+            f"- {progress_message}" for progress_message in progress_messages
+        )
+        return (
+            f"**Simulation batch count:** {batch_count}\n\n"
+            f"**Progress**\n{progress_lines}"
+        )
+
+    @staticmethod
+    def _read_required_finite_float(value: object, label: str) -> float:
+        if value is None:
+            raise ValueError(f"{label} is required.")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(f"{label} must be finite.")
+        return number
 
     def _handle_preprocess(self, _event) -> None:
         selected_batches = [
@@ -416,6 +514,97 @@ class OrderbookDashboard:
             self._set_status(error_message, "danger")
         finally:
             self._set_preprocess_loading(False)
+
+    def _handle_simulation(self, _event) -> None:
+        selected_batches = [
+            self.all_raw_by_label[label]
+            for label in self.simulation_raw_select.value
+            if label in self.all_raw_by_label
+        ]
+        if not selected_batches:
+            self.simulation_progress.object = "No simulation job running."
+            self._set_status(
+                "Select at least one raw batch before running simulation.", "warning"
+            )
+            return
+
+        algorithm_name = self.simulation_algorithm_select.value
+        batch_count = len(selected_batches)
+        progress_messages: list[str] = []
+        self._set_simulation_loading(True)
+        try:
+            resolved_time = self._read_required_finite_float(
+                self.simulation_resolved_time_input.value,
+                "Simulation resolved_time",
+            )
+            time_step = self._read_required_finite_float(
+                self.simulation_time_step_input.value,
+                "Simulation time_step",
+            )
+            progress_messages.append(
+                (
+                    f"Queued {batch_count} raw batch(es) for simulation with "
+                    f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}."
+                )
+            )
+            self.simulation_progress.object = self._format_simulation_progress(
+                batch_count, progress_messages
+            )
+            self._set_status(
+                f"Running simulation for {batch_count} raw batch(es)...", "primary"
+            )
+
+            def update_progress(message: str) -> None:
+                progress_messages.append(message)
+                self.simulation_progress.object = self._format_simulation_progress(
+                    batch_count, progress_messages
+                )
+                self._set_status(message, "primary")
+
+            simulation_results = simulate_batches(
+                selected_batches,
+                output_dir=self.preprocessed_dir,
+                algorithm_name=str(algorithm_name),
+                time_step=time_step,
+                resolved_time=resolved_time,
+                progress_callback=update_progress,
+            )
+            overwritten_count = sum(
+                1 for simulation_result in simulation_results if simulation_result.overwritten
+            )
+            self.refresh_catalog()
+            generated_paths = {
+                simulation_result.output_path for simulation_result in simulation_results
+            }
+            target_dataset = next(
+                (
+                    dataset
+                    for dataset in reversed(self.preprocessed_datasets)
+                    if dataset.simulation_path in generated_paths
+                ),
+                None,
+            )
+            if target_dataset is not None:
+                self._select_fill_probability_dataset(target_dataset)
+            summary = (
+                f"Completed simulation for {batch_count} batch(es). "
+                f"Generated {len(simulation_results)} simulation file(s). "
+                f"Overwrote {overwritten_count} existing file(s)."
+            )
+            progress_messages.append(summary)
+            self.simulation_progress.object = self._format_simulation_progress(
+                batch_count, progress_messages
+            )
+            self._set_status(summary, "success")
+        except Exception as error:
+            error_message = f"Simulation failed: {error}"
+            progress_messages.append(error_message)
+            self.simulation_progress.object = self._format_simulation_progress(
+                batch_count, progress_messages
+            )
+            self._set_status(error_message, "danger")
+        finally:
+            self._set_simulation_loading(False)
 
     def _select_preprocessed_dataset(self, dataset: PreprocessedDataset) -> None:
         if dataset.product_id not in self._selectable_option_values(
@@ -504,6 +693,18 @@ class OrderbookDashboard:
 
     def _handle_raw_selection_change(self, _event) -> None:
         self._update_raw_summary()
+
+    def _handle_simulation_raw_selection_change(self, _event) -> None:
+        self._update_raw_summary()
+
+    def _handle_simulation_algorithm_change(self, _event) -> None:
+        self._sync_simulation_parameter_visibility()
+
+    def _sync_simulation_parameter_visibility(self) -> None:
+        self.simulation_time_step_input.visible = (
+            self.simulation_algorithm_select.value
+            == TIME_AVERAGED_RANDOM_CANCELLATION_NAME
+        )
 
     def _sync_plot_options(self, *, render: bool) -> None:
         product_id = self._selected_product()
@@ -910,21 +1111,71 @@ class OrderbookDashboard:
 
     def _update_raw_summary(self) -> None:
         pending_count = len(self.raw_by_label)
-        selected_count = len(
+        preprocess_selected_count = len(
             [label for label in self.raw_select.value if label in self.raw_by_label]
         )
-        if pending_count == 0:
+        discovered_count = len(self.all_raw_by_label)
+        simulation_selected_count = len(
+            [
+                label
+                for label in self.simulation_raw_select.value
+                if label in self.all_raw_by_label
+            ]
+        )
+        if pending_count == 0 and discovered_count == 0:
             self.raw_summary.object = (
                 "**Pending raw batch count:** 0\n\n"
-                "**Selected raw batch count:** 0\n\n"
-                "No raw batches are ready for preprocessing."
+                "**Selected preprocess batch count:** 0\n\n"
+                "**Discovered raw batch count:** 0\n\n"
+                "**Selected simulation batch count:** 0\n\n"
+                "No raw batches are available."
             )
             return
 
         self.raw_summary.object = (
             f"**Pending raw batch count:** {pending_count}\n\n"
-            f"**Selected raw batch count:** {selected_count}"
+            f"**Selected preprocess batch count:** {preprocess_selected_count}\n\n"
+            f"**Discovered raw batch count:** {discovered_count}\n\n"
+            f"**Selected simulation batch count:** {simulation_selected_count}"
         )
+
+    def _select_fill_probability_dataset(self, dataset: PreprocessedDataset) -> None:
+        if (
+            dataset.product_id not in self._selectable_option_values(self.product_select.options)
+            or dataset.simulation_path is None
+        ):
+            return
+
+        fill_probability_label = self._plot_label_for_type("fill_probability")
+        self._updating_controls = True
+        try:
+            if self.product_select.value != dataset.product_id:
+                self.product_select.value = dataset.product_id
+        finally:
+            self._updating_controls = False
+
+        self._sync_plot_options(render=False)
+        if fill_probability_label in self.plot_select.options:
+            self._updating_controls = True
+            try:
+                if self.plot_select.value != fill_probability_label:
+                    self.plot_select.value = fill_probability_label
+            finally:
+                self._updating_controls = False
+            self._sync_timestamp_options(render=False)
+
+        group_value = self._fill_probability_group_value(
+            self._fill_probability_group_key(dataset)
+        )
+        if group_value in set(self.fill_group_select.options.values()):
+            self._updating_controls = True
+            try:
+                if self.fill_group_select.value != group_value:
+                    self.fill_group_select.value = group_value
+            finally:
+                self._updating_controls = False
+
+        self._render_plots()
 
     def _format_timestamp_range(self, timestamps: list[str]) -> str:
         if not timestamps:
@@ -1224,13 +1475,29 @@ class OrderbookDashboard:
             self.preprocess_progress,
             title="Raw batch preprocessing",
         )
+        simulation_section = self._card(
+            self.simulation_raw_select,
+            self.simulation_algorithm_select,
+            self.simulation_resolved_time_input,
+            self.simulation_time_step_input,
+            pn.Row(
+                self.simulation_button,
+                self.simulation_spinner,
+                sizing_mode="stretch_width",
+                align="center",
+                css_classes=["qf-button-row"],
+            ),
+            self.simulation_progress,
+            title="Virtual order simulation",
+        )
         return pn.Column(
             self._section_heading(
                 "Controls",
-                "Choose datasets, preprocess raw batches, and refresh the catalog.",
+                "Choose datasets, preprocess raw batches, run simulations, and refresh the catalog.",
             ),
             self.build_dataset_section(),
             raw_batch_section,
+            simulation_section,
             sizing_mode="stretch_width",
             min_width=300,
             max_width=420,
