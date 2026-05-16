@@ -1306,8 +1306,8 @@ class OrderbookDashboard:
                 self._updating_controls = False
             self._sync_timestamp_options(render=False)
 
-        group_value = self._fill_probability_group_value(
-            self._fill_probability_group_key(dataset)
+        group_value = self._simulation_group_value(
+            self._simulation_group_key(dataset)
         )
         if group_value in set(self.fill_group_select.options.values()):
             self._updating_controls = True
