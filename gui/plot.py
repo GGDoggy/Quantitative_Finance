@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-import math
 import sys
 
 if __package__ is None or __package__ == "":
@@ -252,6 +251,16 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
             min_height=180,
         )
+        self.simulation_select_all_button = pn.widgets.Button(
+            name="Select All",
+            button_type="default",
+            sizing_mode="stretch_width",
+        )
+        self.simulation_clear_selection_button = pn.widgets.Button(
+            name="Clear Selection",
+            button_type="light",
+            sizing_mode="stretch_width",
+        )
         self.simulation_algorithm_select = pn.widgets.Select(
             name="Simulation algorithm",
             options=get_algorithm_names(),
@@ -352,6 +361,10 @@ class OrderbookDashboard:
 
         self.refresh_button.on_click(self._handle_refresh)
         self.preprocess_button.on_click(self._handle_preprocess)
+        self.simulation_select_all_button.on_click(self._handle_simulation_select_all)
+        self.simulation_clear_selection_button.on_click(
+            self._handle_simulation_clear_selection
+        )
         self.simulation_button.on_click(self._handle_simulation)
         self.product_select.param.watch(self._handle_product_change, "value")
         self.raw_select.param.watch(self._handle_raw_selection_change, "value")
@@ -726,6 +739,12 @@ class OrderbookDashboard:
 
     def _handle_simulation_raw_selection_change(self, _event) -> None:
         self._update_raw_summary()
+
+    def _handle_simulation_select_all(self, _event) -> None:
+        self.simulation_raw_select.value = list(self.all_raw_by_label.keys())
+
+    def _handle_simulation_clear_selection(self, _event) -> None:
+        self.simulation_raw_select.value = []
 
     def _handle_simulation_algorithm_change(self, _event) -> None:
         self._sync_simulation_parameter_visibility()
@@ -1543,6 +1562,13 @@ class OrderbookDashboard:
         )
         simulation_section = self._card(
             self.simulation_raw_select,
+            pn.Row(
+                self.simulation_select_all_button,
+                self.simulation_clear_selection_button,
+                sizing_mode="stretch_width",
+                align="center",
+                css_classes=["qf-button-row"],
+            ),
             self.simulation_algorithm_select,
             self.simulation_resolved_time_input,
             self.simulation_time_step_input,

@@ -248,6 +248,14 @@ def process_dataset_job(
     base_tick,
     resolved_time=DEFAULT_RESOLVED_TIME,
 ):
+    overwritten = build_output_path(
+        output_path,
+        dataset["product_id"],
+        dataset["timestamp"],
+        time_step,
+        algorithm_name,
+        resolved_time,
+    ).exists()
     result = run_dataset_simulation(
         dataset,
         algorithm_name,
@@ -267,7 +275,7 @@ def process_dataset_job(
     return {
         "file_stem": dataset["file_stem"],
         "output_file": str(output_file),
-        "status": "saved",
+        "overwritten": overwritten,
     }
 
 
@@ -280,6 +288,7 @@ def run_datasets_in_parallel(
     resolved_time=DEFAULT_RESOLVED_TIME,
 ):
     worker_count = get_default_worker_count(len(selected))
+    results = []
     failures = []
     with ProcessPoolExecutor(max_workers=worker_count) as executor:
         future_to_dataset = {
@@ -298,11 +307,12 @@ def run_datasets_in_parallel(
             dataset = future_to_dataset[future]
             try:
                 job_result = future.result()
-                print(f"Saved {job_result['output_file']}")
+                results.append(job_result)
             except Exception as exc:
-                print(f"Failed {dataset['file_stem']}: {exc}")
                 failures.append((dataset["file_stem"], exc))
 
     if failures:
         failed_stems = ", ".join(file_stem for file_stem, _exc in failures)
         raise RuntimeError(f"Batch processing failed for: {failed_stems}")
+
+    return results

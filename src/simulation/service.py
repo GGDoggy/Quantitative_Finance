@@ -11,6 +11,7 @@ from .library import (
     DEFAULT_BASE_TICK,
     build_output_path,
     get_algorithm,
+    run_datasets_in_parallel,
     run_dataset_simulation,
     save_simulation_npz,
 )
@@ -51,6 +52,11 @@ def _to_simulation_dataset(raw_batch: RawBatch) -> dict[str, object]:
         "updates": raw_batch.updates_path,
         "trade": raw_batch.trade_path,
     }
+
+
+def _saved_action_message(simulation_result: SimulationJobResult) -> str:
+    action = "overwrote" if simulation_result.overwritten else "saved"
+    return f"{action} {simulation_result.output_path.name}"
 
 
 def simulate_batch(
@@ -107,51 +113,62 @@ def simulate_batches(
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[SimulationJobResult]:
     _validate_parameters(algorithm_name, time_step, resolved_time)
-    results: list[SimulationJobResult] = []
     total = len(raw_batches)
+    if total <= 1:
+        results: list[SimulationJobResult] = []
+        for index, raw_batch in enumerate(raw_batches, start=1):
+            if progress_callback is not None:
+                progress_callback(f"[{index}/{total}] simulating {raw_batch.display_name}")
 
-    for index, raw_batch in enumerate(raw_batches, start=1):
-        if progress_callback is not None:
-            progress_callback(f"[{index}/{total}] simulating {raw_batch.display_name}")
-
-        dataset = _to_simulation_dataset(raw_batch)
-        output_path = build_output_path(
-            output_dir,
-            dataset["product_id"],
-            dataset["timestamp"],
-            time_step,
-            algorithm_name,
-            resolved_time,
-        )
-        output_will_be_overwritten = output_path.exists()
-        result = run_dataset_simulation(
-            dataset,
-            algorithm_name,
-            time_step,
-            base_tick,
-            resolved_time,
-        )
-        saved_path = save_simulation_npz(
-            dataset,
-            output_dir,
-            algorithm_name,
-            time_step,
-            base_tick,
-            result,
-            resolved_time,
-        )
-        action = "overwrote" if output_will_be_overwritten else "saved"
-        if progress_callback is not None:
-            progress_callback(f"{action} {saved_path.name}")
-        results.append(
-            SimulationJobResult(
-                raw_batch=raw_batch,
-                output_path=saved_path,
-                overwritten=output_will_be_overwritten,
+            simulation_result = simulate_batch(
+                raw_batch,
+                output_dir=output_dir,
+                algorithm_name=algorithm_name,
+                time_step=time_step,
+                resolved_time=resolved_time,
+                base_tick=base_tick,
             )
+            if progress_callback is not None:
+                progress_callback(_saved_action_message(simulation_result))
+            results.append(simulation_result)
+
+        if progress_callback is not None and raw_batches:
+            progress_callback(f"Finished simulation for {len(raw_batches)} batch(es).")
+        return results
+
+    raw_batch_by_stem = {
+        f"{raw_batch.product_id}-{raw_batch.timestamp}": raw_batch
+        for raw_batch in raw_batches
+    }
+    raw_batch_order = {
+        f"{raw_batch.product_id}-{raw_batch.timestamp}": index
+        for index, raw_batch in enumerate(raw_batches)
+    }
+    datasets = [_to_simulation_dataset(raw_batch) for raw_batch in raw_batches]
+    job_results = run_datasets_in_parallel(
+        datasets,
+        output_dir,
+        algorithm_name,
+        time_step,
+        base_tick,
+        resolved_time,
+    )
+    results = [
+        SimulationJobResult(
+            raw_batch=raw_batch_by_stem[job_result["file_stem"]],
+            output_path=Path(job_result["output_file"]),
+            overwritten=bool(job_result["overwritten"]),
         )
-
-    if progress_callback is not None and raw_batches:
+        for job_result in job_results
+    ]
+    results.sort(
+        key=lambda simulation_result: raw_batch_order[
+            f"{simulation_result.raw_batch.product_id}-"
+            f"{simulation_result.raw_batch.timestamp}"
+        ]
+    )
+    if progress_callback is not None:
+        for simulation_result in results:
+            progress_callback(_saved_action_message(simulation_result))
         progress_callback(f"Finished simulation for {len(raw_batches)} batch(es).")
-
     return results
