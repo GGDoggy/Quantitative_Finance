@@ -1,15 +1,18 @@
 import numpy as np
 
+from .constants import DEFAULT_RESOLVED_TIME
 from .time_averaged_random_cancellation import (
     advance_best_ask_index,
     advance_best_bid_index,
     append_trade_evidence,
+    append_quote_timeline_updates,
     build_event_stream,
     compute_bid_ask_spread,
     create_virtual_order,
     debug_best_state,
     empty_outputs,
     finalize_unresolved,
+    record_best_quote,
     get_best_levels_from_indices,
     get_orders_bucket,
     initialize_best_indices,
@@ -79,6 +82,7 @@ def simulate_virtual_best_orders(
     start_time,
     time_step,
     base_tick,
+    resolved_time=DEFAULT_RESOLVED_TIME,
 ):
     price_levels = {level[0] for level in init}
     price_levels.update(update[1] for update in updates)
@@ -103,6 +107,22 @@ def simulate_virtual_best_orders(
 
     if simulation_end < simulation_start:
         return empty_outputs()
+
+    quote_timeline = []
+    initial_bid_price, initial_bid_size, initial_ask_price, initial_ask_size = get_best_levels_from_indices(
+        orderbook,
+        price_levels,
+        best_bid_index,
+        best_ask_index,
+    )
+    record_best_quote(
+        quote_timeline,
+        orderbook_start_time,
+        initial_bid_price,
+        initial_bid_size,
+        initial_ask_price,
+        initial_ask_size,
+    )
 
     events = build_event_stream(updates, trades)
     event_index = 0
@@ -135,6 +155,7 @@ def simulate_virtual_best_orders(
             event_index += 1
 
             if event_time > simulation_end:
+                event_index -= 1
                 break
 
             best_bid_price, best_bid_size, best_ask_price, best_ask_size = get_best_levels_from_indices(
@@ -220,6 +241,15 @@ def simulate_virtual_best_orders(
 
             if _has_more_events_at_time(events, event_index, event_time):
                 continue
+
+            record_best_quote(
+                quote_timeline,
+                event_time,
+                current_bid_price,
+                current_bid_size,
+                current_ask_price,
+                current_ask_size,
+            )
 
             (
                 _reference_time,
@@ -358,7 +388,22 @@ def simulate_virtual_best_orders(
     _clamp_unresolved_orders(bid_orders)
     _clamp_unresolved_orders(ask_orders)
 
+    append_quote_timeline_updates(
+        quote_timeline,
+        events,
+        event_index,
+        orderbook,
+        price_levels,
+        best_bid_index,
+        best_ask_index,
+        simulation_end + max(resolved_time, 0.0),
+    )
+
+    bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time, "bid")
+    ask_output = finalize_unresolved(ask_orders, quote_timeline, resolved_time, "ask")
     return (
-        *finalize_unresolved(bid_orders),
-        *finalize_unresolved(ask_orders),
+        *bid_output[:9],
+        *ask_output[:9],
+        *bid_output[9:],
+        *ask_output[9:],
     )
