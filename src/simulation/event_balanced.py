@@ -1,7 +1,11 @@
 import numpy as np
 
 from .constants import DEFAULT_RESOLVED_TIME
-from .algorithm_helpers import append_new_best_orders
+from .algorithm_helpers import (
+    append_new_best_orders,
+    has_more_events_at_time,
+    clamp_unresolved_orders,
+)
 from ._simulation_core import (
     advance_best_ask_index,
     advance_best_bid_index,
@@ -192,7 +196,7 @@ def simulate_virtual_best_orders(
                 updated_index=updated_index,
             )
 
-            if _has_more_events_at_time(events, event_index, event_time):
+            if has_more_events_at_time(events, event_index, event_time):
                 continue
 
             record_best_quote(
@@ -338,8 +342,8 @@ def simulate_virtual_best_orders(
     bid_orders = [order for bucket in bid_orders_by_price.values() for order in bucket]
     ask_orders = [order for bucket in ask_orders_by_price.values() for order in bucket]
 
-    _clamp_unresolved_orders(bid_orders)
-    _clamp_unresolved_orders(ask_orders)
+    clamp_unresolved_orders(bid_orders)
+    clamp_unresolved_orders(ask_orders)
 
     quote_buffer_end = compute_quote_buffer_end(
         (bid_orders, ask_orders),
