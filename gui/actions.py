@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
+
 from src.plots import PLOT_REGISTRY
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
-    TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
+    get_algorithm,
     simulate_batches,
 )
 
@@ -385,11 +387,33 @@ class DashboardActionsMixin:
         """Update algorithm-specific parameter visibility."""
         self._sync_simulation_parameter_visibility()
 
+    def _algorithm_accepts_keyword(
+        self, algorithm_name: str | None, parameter_name: str
+    ) -> bool:
+        """Return whether the selected algorithm accepts a keyword argument."""
+        if not algorithm_name:
+            return False
+
+        try:
+            algorithm = get_algorithm(str(algorithm_name))
+        except ValueError:
+            return False
+
+        parameter = inspect.signature(algorithm).parameters.get(parameter_name)
+        if parameter is None:
+            return False
+
+        return parameter.kind in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.VAR_KEYWORD,
+        }
+
     def _sync_simulation_parameter_visibility(self) -> None:
-        """Show the time-step input only for algorithms that need it."""
-        self.simulation_time_step_input.visible = (
-            self.simulation_algorithm_select.value
-            == TIME_AVERAGED_RANDOM_CANCELLATION_NAME
+        """Show only the controls supported by the selected algorithm."""
+        self.simulation_time_step_input.visible = self._algorithm_accepts_keyword(
+            self.simulation_algorithm_select.value,
+            "time_step",
         )
 
     def _sync_plot_options(self, *, render: bool) -> None:
