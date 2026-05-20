@@ -13,7 +13,7 @@ from .event_balanced import (
     ALGORITHM_NAME as EVENT_BALANCED_NAME,
     simulate_virtual_best_orders as simulate_event_balanced,
 )
-from .time_averaged_random_cancellation import (
+from ._simulation_core import (
     ALGORITHM_NAME as TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
     file_time_to_unix,
     read_csv,
