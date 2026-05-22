@@ -1,6 +1,7 @@
-"""Deprecated shim module for legacy src.plots imports."""
+"""Deprecated shim module for legacy src.plots imports.
 
-"""Register plot types with their lazy plot and preprocess builders."""
+Register plot types with their lazy plot and preprocess builders.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
