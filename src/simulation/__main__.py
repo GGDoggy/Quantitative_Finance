@@ -6,13 +6,12 @@ from . import (
     DEFAULT_TIME_STEP,
     OUTPUT_PATH,
     list_algorithms,
-    parse_dataset_groups,
     process_dataset_job,
     save_result,
     simulate_loaded_data,
 )
 from .constants import DEFAULT_RESOLVED_TIME
-from .io import load_raw_dataset
+from .io import load_raw_dataset, parse_dataset_groups
 from .library import get_default_worker_count
 
 
