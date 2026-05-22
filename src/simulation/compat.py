@@ -64,7 +64,7 @@ def build_output_path(output_path, product_id, timestamp, time_step, algorithm_n
 
 def is_processed(dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("is_processed")
-    return _is_processed(dataset, output_path, time_step, algorithm_name, resolved_time)
+    return _is_processed(_to_dataset(dataset), output_path, time_step, algorithm_name, resolved_time)
 
 
 def load_dataset(dataset):
@@ -81,12 +81,12 @@ def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolv
 
 def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("save_simulation_npz")
-    return _save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result, resolved_time)
+    return _save_simulation_npz(_to_dataset(dataset), output_path, algorithm_name, time_step, base_tick, result, resolved_time)
 
 
 def format_dataset_line(index, dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("format_dataset_line")
-    return _format_dataset_line(index, dataset, output_path, time_step, algorithm_name, resolved_time)
+    return _format_dataset_line(index, _to_dataset(dataset), output_path, time_step, algorithm_name, resolved_time)
 
 
 def parse_selection(selection, item_count):
@@ -96,7 +96,7 @@ def parse_selection(selection, item_count):
 
 def process_dataset_job(dataset, output_path, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("process_dataset_job")
-    return _process_dataset_job(dataset, output_path, algorithm_name, time_step, base_tick, resolved_time)
+    return _process_dataset_job(_to_dataset(dataset), output_path, algorithm_name, time_step, base_tick, resolved_time)
 
 
 def run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):

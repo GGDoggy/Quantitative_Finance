@@ -7,7 +7,7 @@ from .models import LoadedMarketData, RawSimulationDataset
 
 
 def parse_dataset_groups(data_v3_path: Path | str) -> list[RawSimulationDataset]:
-    grouped: dict[tuple[str, str], RawSimulationDataset] = {}
+    grouped: dict[tuple[str, str], dict[str, Path | None]] = {}
     for path in sorted(Path(data_v3_path).glob("*.csv")):
         stem_parts = path.stem.split("-")
         if len(stem_parts) < 4:
@@ -25,31 +25,26 @@ def parse_dataset_groups(data_v3_path: Path | str) -> list[RawSimulationDataset]
             continue
 
         key = (product_id, timestamp)
-        dataset = grouped.get(key)
-        if dataset is None:
-            dataset = RawSimulationDataset(
+        if key not in grouped:
+            grouped[key] = {"init": None, "updates": None, "trade": None}
+        grouped[key][data_type] = path
+
+    available: list[RawSimulationDataset] = []
+    for (product_id, timestamp), parts in grouped.items():
+        init, updates, trade = parts["init"], parts["updates"], parts["trade"]
+        if init is None or updates is None or trade is None:
+            continue
+        available.append(
+            RawSimulationDataset(
                 product_id=product_id,
                 timestamp=timestamp,
                 file_stem=f"{product_id}-{timestamp}",
-                init=Path(),
-                updates=Path(),
-                trade=Path(),
+                init=init,
+                updates=updates,
+                trade=trade,
             )
-
-        grouped[key] = RawSimulationDataset(
-            product_id=dataset.product_id,
-            timestamp=dataset.timestamp,
-            file_stem=dataset.file_stem,
-            init=path if data_type == "init" else dataset.init,
-            updates=path if data_type == "updates" else dataset.updates,
-            trade=path if data_type == "trade" else dataset.trade,
         )
 
-    available = [
-        dataset
-        for dataset in grouped.values()
-        if dataset.init and dataset.updates and dataset.trade
-    ]
     return sorted(available, key=lambda item: (item.product_id, item.timestamp))
 
 
