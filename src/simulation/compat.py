@@ -14,6 +14,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from .constants import DEFAULT_RESOLVED_TIME
 from .io import load_raw_dataset as _load_raw_dataset, parse_dataset_groups as _parse_dataset_groups
@@ -96,15 +97,45 @@ def parse_selection(selection, item_count):
 
 def process_dataset_job(dataset, output_path, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("process_dataset_job")
-    return _process_dataset_job(_to_dataset(dataset), output_path, algorithm_name, time_step, base_tick, resolved_time)
+    result = _process_dataset_job(_to_dataset(dataset), output_path, algorithm_name, time_step, base_tick, resolved_time)
+    return asdict(result)
 
 
 def run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("run_datasets_in_parallel")
-    return _run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick, resolved_time)
+    typed_selected = [_to_dataset(dataset) for dataset in selected]
+    results = _run_datasets_in_parallel(typed_selected, output_path, algorithm_name, time_step, base_tick, resolved_time)
+    return [asdict(result) for result in results]
 
 
 def _to_dataset(dataset):
     if isinstance(dataset, RawSimulationDataset):
         return dataset
-    return RawSimulationDataset(**dataset)
+    if not isinstance(dataset, dict):
+        raise TypeError("dataset must be RawSimulationDataset or dict")
+
+    required = {"file_stem", "init", "updates", "trade"}
+    if required.issubset(dataset):
+        return RawSimulationDataset(**dataset)
+
+    return _to_placeholder_dataset(dataset)
+
+
+def _to_placeholder_dataset(dataset: dict[str, Any]) -> RawSimulationDataset:
+    product_id = dataset.get("product_id")
+    timestamp = dataset.get("timestamp")
+    if not product_id or not timestamp:
+        missing = [key for key in ("product_id", "timestamp") if not dataset.get(key)]
+        missing_text = ", ".join(missing)
+        raise TypeError(f"dataset dict missing required fields: {missing_text}")
+
+    file_stem = dataset.get("file_stem") or f"{product_id}-{timestamp}"
+    placeholder = Path("__compat_placeholder__.csv")
+    return RawSimulationDataset(
+        product_id=product_id,
+        timestamp=timestamp,
+        file_stem=file_stem,
+        init=dataset.get("init", placeholder),
+        updates=dataset.get("updates", placeholder),
+        trade=dataset.get("trade", placeholder),
+    )
