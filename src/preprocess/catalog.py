@@ -610,16 +610,35 @@ def load_preprocessed_payload(
             f"Preprocessed dataset {path.name} is missing required fields: {missing_fields}."
         )
 
-    if not (
-        payload["data"].shape == payload["bid"].shape == payload["ask"].shape
-    ):
-        raise PreprocessedDataSchemaError(
-            f"Preprocessed dataset {path.name} has mismatched data/bid/ask shapes."
-        )
+    data = payload["data"]
+    bid = payload["bid"]
+    ask = payload["ask"]
+    time_axis = payload["time_axis"]
+    price_axis = payload["price_axis"]
 
-    if payload["time_axis"].ndim != 1 or payload["price_axis"].ndim != 1:
+    if time_axis.ndim != 1 or price_axis.ndim != 1:
         raise PreprocessedDataSchemaError(
             f"Preprocessed dataset {path.name} has invalid axis dimensionality."
+        )
+
+    if data.ndim != 2 or bid.ndim != 1 or ask.ndim != 1:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has invalid data/bid/ask dimensionality."
+        )
+
+    if bid.shape != ask.shape:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has mismatched bid/ask shapes."
+        )
+
+    if (
+        data.shape[0] != time_axis.shape[0]
+        or bid.shape[0] != time_axis.shape[0]
+        or ask.shape[0] != time_axis.shape[0]
+        or data.shape[1] != price_axis.shape[0]
+    ):
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has incompatible data/bid/ask axis lengths."
         )
 
     payload["product_id"] = dataset.product_id

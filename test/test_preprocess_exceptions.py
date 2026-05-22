@@ -52,7 +52,7 @@ def test_load_preprocessed_payload_raises_schema_error_for_missing_fields(tmp_pa
         raise AssertionError("Expected PreprocessedDataSchemaError")
 
 
-def test_load_preprocessed_payload_raises_schema_error_for_mismatched_shapes(tmp_path):
+def test_load_preprocessed_payload_raises_schema_error_for_invalid_data_dimensionality(tmp_path):
     path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
     np.savez(
         path,
@@ -60,13 +60,33 @@ def test_load_preprocessed_payload_raises_schema_error_for_mismatched_shapes(tmp
         time_axis=np.array([1.0, 2.0]),
         data=np.ones((2, 2)),
         bid=np.ones((2, 1)),
-        ask=np.ones((2, 2)),
+        ask=np.ones((2,)),
     )
 
     dataset = _discover_one_dataset(tmp_path)
     try:
         load_preprocessed_payload(dataset)
     except PreprocessedDataSchemaError as exc:
-        assert "mismatched data/bid/ask shapes" in str(exc)
+        assert "invalid data/bid/ask dimensionality" in str(exc)
+    else:
+        raise AssertionError("Expected PreprocessedDataSchemaError")
+
+
+def test_load_preprocessed_payload_raises_schema_error_for_incompatible_axis_lengths(tmp_path):
+    path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    np.savez(
+        path,
+        price_axis=np.array([1.0]),
+        time_axis=np.array([1.0, 2.0]),
+        data=np.ones((2, 2)),
+        bid=np.ones((2,)),
+        ask=np.ones((2,)),
+    )
+
+    dataset = _discover_one_dataset(tmp_path)
+    try:
+        load_preprocessed_payload(dataset)
+    except PreprocessedDataSchemaError as exc:
+        assert "incompatible data/bid/ask axis lengths" in str(exc)
     else:
         raise AssertionError("Expected PreprocessedDataSchemaError")
