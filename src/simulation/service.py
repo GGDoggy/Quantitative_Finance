@@ -1,12 +1,12 @@
 """UI-friendly helpers for running fill-probability simulations from raw batches."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 import math
 from typing import TYPE_CHECKING, Callable
 
 from .constants import DEFAULT_RESOLVED_TIME
+from .models import RawSimulationDataset, SimulationJobResult
 from .library import (
     DEFAULT_BASE_TICK,
     build_output_path,
@@ -19,12 +19,6 @@ from .library import (
 if TYPE_CHECKING:
     from src.preprocess.catalog import RawBatch
 
-
-@dataclass(frozen=True)
-class SimulationJobResult:
-    raw_batch: RawBatch
-    output_path: Path
-    overwritten: bool
 
 
 def _validate_parameters(
@@ -43,7 +37,7 @@ def _validate_parameters(
         raise ValueError("Simulation resolved_time must be non-negative.")
 
 
-def _to_simulation_dataset(raw_batch: RawBatch) -> dict[str, object]:
+def _to_simulation_dataset(raw_batch: RawBatch) -> RawSimulationDataset:
     return {
         "product_id": raw_batch.product_id,
         "timestamp": raw_batch.timestamp,
