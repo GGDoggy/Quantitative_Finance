@@ -11,7 +11,7 @@ from typing import Iterable, MutableMapping
 
 import numpy as np
 
-from src.plots.errors import PreprocessedDataError
+from src.plotlib.errors import PreprocessedDataError
 from src.app_plot_registry import APP_PLOT_REGISTRY
 from src.plotlib.discovery import (
     SimulationFileMetadata,

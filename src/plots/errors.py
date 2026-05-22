@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
+from src.plotlib.errors import PreprocessedDataError
 
-class PreprocessedDataError(RuntimeError):
-    pass
+__all__ = ["PreprocessedDataError"]
