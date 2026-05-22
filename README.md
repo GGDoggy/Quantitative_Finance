@@ -109,3 +109,27 @@ Trade batch:
 - In `level2`, `Side` is `-1` for sell and `+1` for buy.
 - In `trade`, `Side` is `-1` for sell maker and `+1` for buy maker.
 - `Time` is measured in seconds from midnight of the filename date.
+
+## Preprocess API Boundaries
+
+`src.preprocess` now has an explicit package-level **public API** for stable imports.
+
+### Stable public API (import from `src.preprocess`)
+
+- Exceptions: `PreprocessError`, `PreprocessValidationError`, `PreprocessOutputConflictError`, `PreprocessedDataError`, `PreprocessedDataFileError`, `PreprocessedDataSchemaError`
+- Catalog/data models: `RawBatch`, `PreprocessedDataset`, `PlotDatasetLocator`
+- Catalog entry points: `discover_raw_batches`, `discover_preprocessed_datasets`, `load_preprocessed_payload`
+- Preprocess services: `DEFAULT_TIME_STEP`, `preprocess_batch`, `preprocess_batches`
+
+### Internal modules (import explicitly, no stability guarantee)
+
+- `src.preprocess.catalog` internals and filename/token helpers (for example: simulation filename matching, timestamp/time-step formatting helpers)
+- `src.preprocess.common` context construction details
+- Plot-specific preprocess builders under `src.preprocess.orderbook`, `src.preprocess.trades_scatter`, and `src.preprocess.trade_volume_timeline`
+- Adapters under `src.preprocess.adapters`
+
+### Migration and deprecation rule
+
+- New code should prefer the stable package-level API above.
+- If a caller needs an internal helper, import from the concrete internal module directly and treat it as refactorable.
+- Some legacy package-level names are currently kept as transitional aliases and emit `DeprecationWarning`; these aliases will be removed in a future cleanup.
