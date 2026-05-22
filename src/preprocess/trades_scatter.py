@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from .common import PreprocessContext, build_trade_arrays
+from .io import build_trade_arrays
+from .models import PreprocessContext
 
 
 def build_trades_scatter_payload(context: PreprocessContext) -> dict[str, object]:
