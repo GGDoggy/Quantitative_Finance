@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.plots import PLOT_LABELS, PLOT_REGISTRY
+from src.app_plot_registry import APP_PLOT_LABELS, APP_PLOT_REGISTRY
 from src.preprocess import (
     PreprocessedDataset,
     discover_preprocessed_datasets,
@@ -80,7 +80,7 @@ class DashboardCatalogMixin:
             {
                 dataset.product_id
                 for dataset in self.preprocessed_datasets
-                if any(view in PLOT_REGISTRY for view in dataset.available_views)
+                if any(view in APP_PLOT_REGISTRY for view in dataset.available_views)
             }
         )
 
@@ -113,11 +113,11 @@ class DashboardCatalogMixin:
 
     def _plot_label_for_type(self, plot_type: str) -> str:
         """Return the user-facing label for a plot type."""
-        return PLOT_LABELS.get(plot_type, plot_type)
+        return APP_PLOT_LABELS.get(plot_type, plot_type)
 
     def _plot_type_for_label(self, plot_label: str) -> str:
         """Resolve a user-facing plot label back to its plot type."""
-        return next(key for key, value in PLOT_LABELS.items() if value == plot_label)
+        return next(key for key, value in APP_PLOT_LABELS.items() if value == plot_label)
 
     def _datasets_for_product(self, product_id: str) -> list[PreprocessedDataset]:
         """Return all datasets belonging to the given product."""
@@ -133,11 +133,11 @@ class DashboardCatalogMixin:
             view
             for dataset in self._datasets_for_product(product_id)
             for view in dataset.available_views
-            if view in PLOT_REGISTRY
+            if view in APP_PLOT_REGISTRY
         }
         return [
             self._plot_label_for_type(plot_type)
-            for plot_type in PLOT_REGISTRY
+            for plot_type in APP_PLOT_REGISTRY
             if plot_type in plot_types
         ]
 
@@ -321,7 +321,7 @@ class DashboardCatalogMixin:
         product_datasets = self._datasets_for_product(product_id)
         available_views = [
             self._plot_label_for_type(plot_type)
-            for plot_type in PLOT_REGISTRY
+            for plot_type in APP_PLOT_REGISTRY
             if any(plot_type in dataset.available_views for dataset in product_datasets)
         ]
         selected_datasets = self._selected_datasets_for_plot()

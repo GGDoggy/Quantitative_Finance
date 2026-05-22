@@ -7,7 +7,8 @@ import math
 import panel as pn
 from plotly.graph_objects import Figure
 
-from src.plots import PLOT_REGISTRY, PlotRenderOptions
+from src.app_plot_registry import APP_PLOT_REGISTRY
+from src.plots import PlotRenderOptions
 from src.preprocess import PlotDatasetLocator, PreprocessedDataset
 
 from .styles import (
@@ -40,7 +41,7 @@ class DashboardRenderingMixin:
         self, plot_type: str, locators: list[PlotDatasetLocator]
     ) -> pn.viewable.Viewable:
         """Build the Panel pane for a plot type and dataset locator list."""
-        builder = PLOT_REGISTRY[plot_type].plot_builder
+        builder = APP_PLOT_REGISTRY[plot_type].builder
         render_options = PlotRenderOptions(
             cost=self._selected_cost() if plot_type in COST_FILTERED_PLOT_TYPES else None,
             simulation_heatmap_settings=(
