@@ -15,10 +15,11 @@ from .event_balanced import (
 )
 from ._simulation_core import (
     ALGORITHM_NAME as TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
-    file_time_to_unix,
-    read_csv,
     simulate_virtual_best_orders as simulate_time_averaged_random_cancellation,
 )
+from .io import load_raw_dataset, parse_dataset_groups
+from .models import RawSimulationDataset, SimulationRequest, SimulationWorkerPayload
+from .runner import run_dataset_simulation
 
 
 DATA_V3_PATH = Path("data/v3")
@@ -73,40 +74,6 @@ def get_algorithm(name):
         raise ValueError(f"Unknown simulation algorithm: {name}") from exc
 
 
-def parse_dataset_groups(data_v3_path):
-    grouped = {}
-    for path in sorted(Path(data_v3_path).glob("*.csv")):
-        stem_parts = path.stem.split("-")
-        if len(stem_parts) < 4:
-            continue
-
-        if stem_parts[0] == "level2" and stem_parts[-2] in {"init", "updates"}:
-            data_type = stem_parts[-2]
-            timestamp = stem_parts[-1]
-            product_id = "-".join(stem_parts[1:-2])
-        elif stem_parts[0] == "trade":
-            data_type = "trade"
-            timestamp = stem_parts[-1]
-            product_id = "-".join(stem_parts[1:-1])
-        else:
-            continue
-
-        key = (product_id, timestamp)
-        grouped.setdefault(
-            key,
-            {
-                "product_id": product_id,
-                "timestamp": timestamp,
-                "file_stem": f"{product_id}-{timestamp}",
-            },
-        )[data_type] = path
-
-    available = []
-    for dataset in grouped.values():
-        if {"init", "updates", "trade"} <= dataset.keys():
-            available.append(dataset)
-    return sorted(available, key=lambda item: (item["product_id"], item["timestamp"]))
-
 
 def build_output_path(
     output_path,
@@ -132,34 +99,14 @@ def is_processed(
 ):
     return build_output_path(
         output_path,
-        dataset["product_id"],
-        dataset["timestamp"],
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
         algorithm_name,
         resolved_time,
     ).exists()
 
 
-def load_dataset(dataset):
-    init = read_csv(dataset["init"])
-    updates = read_csv(dataset["updates"])
-    trades = read_csv(dataset["trade"])
-    start_time = file_time_to_unix(dataset["timestamp"])
-    return init, updates, trades, start_time
-
-
-def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
-    algorithm = get_algorithm(algorithm_name)
-    init, updates, trades, start_time = load_dataset(dataset)
-    return algorithm(
-        init,
-        updates,
-        trades,
-        start_time,
-        time_step=time_step,
-        base_tick=base_tick,
-        resolved_time=resolved_time,
-    )
 
 
 def save_simulation_npz(
@@ -173,8 +120,8 @@ def save_simulation_npz(
 ):
     output_file = build_output_path(
         output_path,
-        dataset["product_id"],
-        dataset["timestamp"],
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
         algorithm_name,
         resolved_time,
@@ -183,8 +130,8 @@ def save_simulation_npz(
 
     save_kwargs = {
         "algorithm": algorithm_name,
-        "product_id": dataset["product_id"],
-        "file_stem": dataset["file_stem"],
+        "product_id": dataset.product_id,
+        "file_stem": dataset.file_stem,
         "time_step": time_step,
         "base_tick": base_tick,
         "resolved_time": resolved_time,
@@ -204,13 +151,13 @@ def format_dataset_line(
 ):
     output_file = build_output_path(
         output_path,
-        dataset["product_id"],
-        dataset["timestamp"],
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
         algorithm_name,
         resolved_time,
     )
-    return f"[{index}] {dataset['file_stem']} -> {output_file.name}"
+    return f"[{index}] {dataset.file_stem} -> {output_file.name}"
 
 
 def parse_selection(selection, item_count):
@@ -250,19 +197,21 @@ def process_dataset_job(
 ):
     overwritten = build_output_path(
         output_path,
-        dataset["product_id"],
-        dataset["timestamp"],
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
         algorithm_name,
         resolved_time,
     ).exists()
-    result = run_dataset_simulation(
-        dataset,
-        algorithm_name,
-        time_step,
-        base_tick,
-        resolved_time,
+    request = SimulationRequest(
+        dataset=dataset,
+        algorithm_name=algorithm_name,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
     )
+    loaded_data = load_raw_dataset(dataset)
+    result = run_dataset_simulation(request, loaded_data)
     output_file = save_simulation_npz(
         dataset,
         output_path,
@@ -272,22 +221,28 @@ def process_dataset_job(
         result,
         resolved_time,
     )
-    return {
-        "file_stem": dataset["file_stem"],
-        "output_file": str(output_file),
-        "overwritten": overwritten,
-    }
+    return SimulationWorkerPayload(
+        file_stem=dataset.file_stem,
+        output_file=str(output_file),
+        overwritten=overwritten,
+    )
 
 
 def run_datasets_in_parallel(
-    selected,
+    selected: list[RawSimulationDataset],
     output_path,
     algorithm_name,
     time_step,
     base_tick,
     resolved_time=DEFAULT_RESOLVED_TIME,
 ):
-    worker_count = get_default_worker_count(len(selected))
+    normalized = [
+        dataset
+        if isinstance(dataset, RawSimulationDataset)
+        else RawSimulationDataset(**dataset)
+        for dataset in selected
+    ]
+    worker_count = get_default_worker_count(len(normalized))
     results = []
     failures = []
     with ProcessPoolExecutor(max_workers=worker_count) as executor:
@@ -301,7 +256,7 @@ def run_datasets_in_parallel(
                 base_tick,
                 resolved_time,
             ): dataset
-            for dataset in selected
+            for dataset in normalized
         }
         for future in as_completed(future_to_dataset):
             dataset = future_to_dataset[future]
@@ -309,7 +264,7 @@ def run_datasets_in_parallel(
                 job_result = future.result()
                 results.append(job_result)
             except Exception as exc:
-                failures.append((dataset["file_stem"], exc))
+                failures.append((dataset.file_stem, exc))
 
     if failures:
         failed_stems = ", ".join(file_stem for file_stem, _exc in failures)

@@ -9,6 +9,8 @@ from .models import (
     SimulationRequest,
     SimulationResult,
 )
+from .io import load_raw_dataset, parse_dataset_groups as parse_raw_dataset_groups
+from .runner import run_dataset_simulation as run_simulation_request
 from .service import (
     list_algorithms,
     save_result,
@@ -58,6 +60,9 @@ __all__ = [
     "DEFAULT_BASE_TICK",
     "DEFAULT_TIME_STEP",
     "DEFAULT_RESOLVED_TIME",
+    "load_raw_dataset",
+    "parse_raw_dataset_groups",
+    "run_simulation_request",
     # compat
     "build_output_path",
     "format_dataset_line",

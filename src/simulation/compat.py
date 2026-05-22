@@ -12,20 +12,21 @@ Deprecation policy:
 from __future__ import annotations
 
 import warnings
+from dataclasses import asdict
 from pathlib import Path
 
 from .constants import DEFAULT_RESOLVED_TIME
+from .io import load_raw_dataset as _load_raw_dataset, parse_dataset_groups as _parse_dataset_groups
+from .models import RawSimulationDataset, SimulationRequest
+from .runner import run_dataset_simulation as _run_dataset_simulation
 from .library import (
     build_output_path as _build_output_path,
     format_dataset_line as _format_dataset_line,
     get_algorithm as _get_algorithm,
     get_algorithm_names as _get_algorithm_names,
     is_processed as _is_processed,
-    load_dataset as _load_dataset,
-    parse_dataset_groups as _parse_dataset_groups,
     parse_selection as _parse_selection,
     process_dataset_job as _process_dataset_job,
-    run_dataset_simulation as _run_dataset_simulation,
     run_datasets_in_parallel as _run_datasets_in_parallel,
     save_simulation_npz as _save_simulation_npz,
 )
@@ -53,7 +54,7 @@ def get_algorithm(name):
 
 def parse_dataset_groups(data_v3_path):
     _warn("parse_dataset_groups")
-    return _parse_dataset_groups(data_v3_path)
+    return [asdict(d) for d in _parse_dataset_groups(data_v3_path)]
 
 
 def build_output_path(output_path, product_id, timestamp, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
@@ -68,12 +69,14 @@ def is_processed(dataset, output_path, time_step, algorithm_name, resolved_time=
 
 def load_dataset(dataset):
     _warn("load_dataset")
-    return _load_dataset(dataset)
+    return _load_raw_dataset(_to_dataset(dataset))
 
 
 def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("run_dataset_simulation")
-    return _run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolved_time)
+    typed = _to_dataset(dataset)
+    req = SimulationRequest(typed, algorithm_name, time_step, base_tick, resolved_time)
+    return _run_dataset_simulation(req, _load_raw_dataset(typed))
 
 
 def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result, resolved_time=DEFAULT_RESOLVED_TIME):
@@ -99,3 +102,9 @@ def process_dataset_job(dataset, output_path, algorithm_name, time_step, base_ti
 def run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("run_datasets_in_parallel")
     return _run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick, resolved_time)
+
+
+def _to_dataset(dataset):
+    if isinstance(dataset, RawSimulationDataset):
+        return dataset
+    return RawSimulationDataset(**dataset)
