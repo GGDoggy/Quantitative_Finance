@@ -9,17 +9,12 @@ Migration policy:
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
-import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST_PATH = ROOT / "tools" / "src_plots_import_allowlist.txt"
-IMPORT_RE = re.compile(
-    r"\b(from\s+src\.plots\b|import\s+src\.plots\b|from\s+src\s+import\s+[^\n#]*\bplots\b)"
-)
-
-
 def _iter_py_files() -> list[Path]:
     return [
         path
@@ -31,10 +26,27 @@ def _iter_py_files() -> list[Path]:
 def _is_ignored(path: Path) -> bool:
     rel = path.relative_to(ROOT)
     parts = rel.parts
-    if parts and parts[0] in {"src", "test"} and len(parts) > 1 and parts[1] == "plots":
+    if parts and parts[0] == "src" and len(parts) > 1 and parts[1] == "plots":
+        return True
+    if rel.as_posix().startswith("test/plots/test_src_plots_deprecation"):
         return True
     if parts and parts[0] == "scripts" and parts[-1] == "check_src_plots_imports.py":
         return True
+    return False
+
+
+def _contains_src_plots_import(source: str) -> bool:
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "src.plots" or alias.name.startswith("src.plots."):
+                    return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "src.plots" or (node.module and node.module.startswith("src.plots.")):
+                return True
+            if node.module == "src" and any(alias.name == "plots" for alias in node.names):
+                return True
     return False
 
 
@@ -43,7 +55,8 @@ def _current_import_files() -> set[str]:
     for path in _iter_py_files():
         if _is_ignored(path):
             continue
-        if IMPORT_RE.search(path.read_text(encoding="utf-8")):
+        source = path.read_text(encoding="utf-8")
+        if _contains_src_plots_import(source):
             found.add(path.relative_to(ROOT).as_posix())
     return found
 
