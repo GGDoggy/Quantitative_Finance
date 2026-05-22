@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
-from typing import Callable
+from typing import Callable, Mapping, Protocol
 
 import numpy as np
 
-from src.plots.registry import PLOT_REGISTRY
 from src.preprocess.catalog import (
     PreprocessedDataset,
     RawBatch,
@@ -18,6 +17,17 @@ from src.preprocess.common import build_context
 
 
 DEFAULT_TIME_STEP = 0.01
+
+
+class BuilderSpec(Protocol):
+    preprocess_builder: Callable[[object], dict[str, object]] | None
+    required_payload_keys: tuple[str, ...]
+
+
+def get_default_builder_registry() -> Mapping[str, BuilderSpec]:
+    from src.plots.registry import PLOT_REGISTRY
+
+    return PLOT_REGISTRY
 
 
 def _merge_payload_chunk(base_payload: dict[str, object], chunk: dict[str, object]) -> None:
@@ -44,12 +54,16 @@ def preprocess_batch(
     batch: RawBatch,
     output_dir: Path,
     time_step: float = DEFAULT_TIME_STEP,
+    builder_registry: Mapping[str, BuilderSpec] | None = None,
 ) -> PreprocessedDataset:
     context = build_context(batch, time_step)
     payload: dict[str, object] = {}
     available_views: list[str] = []
+    registry = (
+        get_default_builder_registry() if builder_registry is None else builder_registry
+    )
 
-    for plot_key, spec in PLOT_REGISTRY.items():
+    for plot_key, spec in registry.items():
         if spec.preprocess_builder is None:
             continue
 
@@ -95,6 +109,7 @@ def preprocess_batches(
     batches: list[RawBatch],
     output_dir: Path,
     time_step: float = DEFAULT_TIME_STEP,
+    builder_registry: Mapping[str, BuilderSpec] | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[PreprocessedDataset]:
     results: list[PreprocessedDataset] = []
@@ -104,7 +119,12 @@ def preprocess_batches(
         if progress_callback is not None:
             progress_callback(f"[{index}/{total}] preprocessing {batch.display_name}")
         results.append(
-            preprocess_batch(batch, output_dir=output_dir, time_step=time_step)
+            preprocess_batch(
+                batch,
+                output_dir=output_dir,
+                time_step=time_step,
+                builder_registry=builder_registry,
+            )
         )
 
     if progress_callback is not None and batches:
