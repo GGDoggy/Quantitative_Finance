@@ -17,7 +17,12 @@ from src.simulation import (  # noqa: E402
     simulate_loaded_data,
 )
 from src.simulation.constants import DEFAULT_RESOLVED_TIME  # noqa: E402
-from src.simulation.library import load_dataset  # noqa: E402
+from src.simulation.library import (  # noqa: E402
+    get_default_worker_count,
+    load_dataset,
+    process_dataset_job,
+)
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 def _parse_dataset_groups(data_v3_path):
@@ -186,9 +191,32 @@ def main(
         return
 
     print(f"Processing {len(selected)} datasets with {algorithm_name}...")
-    for dataset in selected:
-        output_file = _process_dataset(dataset, output_path, algorithm_name, time_step, base_tick)
-        print(f"Saved {output_file}")
+    failures = []
+    worker_count = get_default_worker_count(len(selected))
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        future_to_dataset = {
+            executor.submit(
+                process_dataset_job,
+                dataset,
+                output_path,
+                algorithm_name,
+                time_step,
+                base_tick,
+            ): dataset
+            for dataset in selected
+        }
+        for future in as_completed(future_to_dataset):
+            dataset = future_to_dataset[future]
+            try:
+                job_result = future.result()
+                print(f"Saved {job_result['output_file']}")
+            except Exception as exc:
+                failures.append((dataset["file_stem"], exc))
+                print(f"Failed {dataset['file_stem']}: {exc}")
+
+    if failures:
+        failed_stems = ", ".join(file_stem for file_stem, _exc in failures)
+        print(f"Completed with failures: {failed_stems}")
 
 
 if __name__ == "__main__":
