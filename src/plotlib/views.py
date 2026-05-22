@@ -1,87 +1,96 @@
 from __future__ import annotations
 
-import importlib
+from collections.abc import Sequence
 
 from .options import PlotRenderOptions
-from .protocols import PlotDatasetLocator
-
-
-def _legacy_builder(module_name: str, attr_name: str):
-    module = importlib.import_module(module_name)
-    return getattr(module, attr_name)
+from .types import OrderbookPayloadV1, SimulationArraysV1, TradesPayloadV1
 
 
 def build_orderbook_view(
-    locators: list[PlotDatasetLocator],
+    payloads: list[OrderbookPayloadV1],
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder("src.plots.orderbook", "build_orderbook_view")
-    return implementation(locators, render_options=render_options)
+    from .renderers.orderbook import build_orderbook_view as implementation
+
+    return implementation(payloads, render_options=render_options)
 
 
 def build_trades_scatter_view(
-    locators: list[PlotDatasetLocator],
+    trade_frames_or_payloads: Sequence[TradesPayloadV1 | object],
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder(
-        "src.plots.trades_scatter", "build_trades_scatter_view"
+    from .renderers.trades_scatter import build_trades_scatter_view as implementation
+
+    return implementation(
+        trade_frames_or_payloads, render_options=render_options
     )
-    return implementation(locators, render_options=render_options)
 
 
 def build_trade_volume_timeline_view(
-    locators: list[PlotDatasetLocator],
+    trade_frames_or_payloads: Sequence[TradesPayloadV1 | object],
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder(
-        "src.plots.trade_volume_timeline", "build_trade_volume_timeline_view"
+    from .renderers.trade_volume_timeline import (
+        build_trade_volume_timeline_view as implementation,
     )
-    return implementation(locators, render_options=render_options)
+
+    return implementation(
+        trade_frames_or_payloads, render_options=render_options
+    )
 
 
 def build_fill_probability_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder(
-        "src.plots.fill_probability", "build_fill_probability_view"
+    from .renderers.fill_probability import build_fill_probability_view as implementation
+
+    return implementation(
+        simulation_arrays, render_options=render_options
     )
-    return implementation(locators, render_options=render_options)
 
 
 def build_mid_profit_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder("src.plots.profit_heatmap", "build_mid_profit_view")
-    return implementation(locators, render_options=render_options)
+    from .renderers.profit_heatmap import build_mid_profit_view as implementation
+
+    return implementation(simulation_arrays, render_options=render_options)
 
 
 def build_micro_profit_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder(
-        "src.plots.profit_heatmap", "build_micro_profit_view"
+    from .renderers.profit_heatmap import build_micro_profit_view as implementation
+
+    return implementation(
+        simulation_arrays, render_options=render_options
     )
-    return implementation(locators, render_options=render_options)
 
 
 def build_mid_cost_fill_probability_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder(
-        "src.plots.cost_fill_probability", "build_mid_cost_fill_probability_view"
+    from .renderers.cost_fill_probability import (
+        build_mid_cost_fill_probability_view as implementation,
     )
-    return implementation(locators, render_options=render_options)
+
+    return implementation(
+        simulation_arrays, render_options=render_options
+    )
 
 
 def build_micro_cost_fill_probability_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ):
-    implementation = _legacy_builder(
-        "src.plots.cost_fill_probability", "build_micro_cost_fill_probability_view"
+    from .renderers.cost_fill_probability import (
+        build_micro_cost_fill_probability_view as implementation,
     )
-    return implementation(locators, render_options=render_options)
+
+    return implementation(
+        simulation_arrays, render_options=render_options
+    )

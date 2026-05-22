@@ -20,7 +20,8 @@ class ImportRule:
 RULES = (
     ImportRule("src.plotlib", "src.preprocess"),
     ImportRule("src.plotlib", "gui"),
-    ImportRule("src.preprocess.catalog", "src.plots"),
+    ImportRule("src.preprocess", "src.plots"),
+    ImportRule("gui", "src.plots"),
 )
 
 

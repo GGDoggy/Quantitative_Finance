@@ -1,5 +1,4 @@
 from .catalog import (
-    PlotDatasetLocator,
     PreprocessedDataset,
     RawBatch,
     detect_available_views,
@@ -8,7 +7,6 @@ from .catalog import (
     find_simulation_files,
     format_time_step,
     has_simulation_file,
-    load_preprocessed_payload,
     parse_timestamp,
 )
 from .common import PreprocessContext, build_context

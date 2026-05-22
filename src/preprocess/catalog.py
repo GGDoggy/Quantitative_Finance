@@ -1,13 +1,12 @@
 """Catalog raw Coinbase CSV batches and preprocessed plot datasets."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
+from typing import Iterable
 import zipfile
-from typing import Iterable, MutableMapping
 
 import numpy as np
 
@@ -68,37 +67,6 @@ class RawBatch:
 
 
 @dataclass(frozen=True)
-class PlotDatasetLocator:
-    product_id: str
-    timestamp: str
-    time_step: float
-    preprocessed_dir: Path
-    time_step_token: str | None = None
-    resolved_time: float | None = None
-    resolved_time_token: str | None = None
-    algorithm_name: str | None = None
-    original_path: Path | None = None
-    simulation_path: Path | None = None
-    payload_cache: MutableMapping[Path, dict[str, object]] | None = field(
-        default=None,
-        compare=False,
-        hash=False,
-        repr=False,
-    )
-
-    @property
-    def base_id(self) -> str:
-        time_step_token = self.time_step_token or format_time_step(self.time_step)
-        return f"{self.product_id}-{self.timestamp}-{time_step_token}"
-
-    @property
-    def path(self) -> Path:
-        if self.original_path is not None:
-            return self.original_path
-        return self.preprocessed_dir / f"{self.base_id}-orderbook_for_plot.npz"
-
-
-@dataclass(frozen=True)
 class PreprocessedDataset:
     product_id: str
     timestamp: str
@@ -129,25 +97,6 @@ class PreprocessedDataset:
         return (
             f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s"
             f"{simulation_suffix} | {views}"
-        )
-
-    def to_locator(
-        self,
-        preprocessed_dir: Path,
-        payload_cache: MutableMapping[Path, dict[str, object]] | None = None,
-    ) -> PlotDatasetLocator:
-        return PlotDatasetLocator(
-            product_id=self.product_id,
-            timestamp=self.timestamp,
-            time_step=self.time_step,
-            preprocessed_dir=preprocessed_dir,
-            time_step_token=self.time_step_token,
-            resolved_time=self.resolved_time,
-            resolved_time_token=self.resolved_time_token,
-            algorithm_name=self.algorithm_name,
-            original_path=self.path,
-            simulation_path=self.simulation_path,
-            payload_cache=payload_cache,
         )
 
 
@@ -181,14 +130,14 @@ def has_simulation_file(
 
 def detect_available_views(
     path: Path,
-    dataset_hint: PlotDatasetLocator | None = None,
+    dataset_hint: PreprocessedDataset | None = None,
 ) -> tuple[str, ...]:
-    locator = dataset_hint or PlotDatasetLocator(
+    dataset = dataset_hint or PreprocessedDataset(
         product_id="",
         timestamp="19700101.000000",
         time_step=0.01,
-        preprocessed_dir=path.parent,
-        original_path=path,
+        path=path,
+        available_views=(),
     )
 
     try:
@@ -203,14 +152,14 @@ def detect_available_views(
     available_views = tuple(
         plot_id
         for plot_id, entry in APP_PLOT_REGISTRY.items()
-        if plot_id in encoded_views and entry.supports_dataset(locator)
+        if plot_id in encoded_views and entry.supports_dataset(dataset)
     )
 
     if (
         dataset_hint is not None
         and any(view_key in APP_PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
         and has_simulation_file(
-            dataset_hint.preprocessed_dir,
+            path.parent,
             dataset_hint.product_id,
             dataset_hint.timestamp,
             dataset_hint.time_step,
@@ -279,17 +228,17 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         )
 
         if preprocessed_match:
-            locator = PlotDatasetLocator(
+            dataset_hint = PreprocessedDataset(
                 product_id=product_id,
                 timestamp=timestamp,
                 time_step=time_step,
-                preprocessed_dir=preprocessed_dir,
+                path=file_path,
+                available_views=(),
                 time_step_token=time_step_token,
-                original_path=file_path,
             )
 
             try:
-                available_views = detect_available_views(file_path, locator)
+                available_views = detect_available_views(file_path, dataset_hint)
             except PreprocessedDataError:
                 continue
 
@@ -425,27 +374,3 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
         )
 
     return batches
-
-
-def load_preprocessed_payload(
-    dataset: PreprocessedDataset | PlotDatasetLocator,
-) -> dict[str, object]:
-    path = dataset.path
-    cache = dataset.payload_cache if isinstance(dataset, PlotDatasetLocator) else None
-    if cache is not None and path in cache:
-        return cache[path]
-
-    try:
-        with np.load(path, allow_pickle=False) as data:
-            payload = {key: data[key] for key in data.files}
-    except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise PreprocessedDataError(f"Failed to load {path.name}: {error}") from error
-
-    payload["product_id"] = dataset.product_id
-    payload["timestamp"] = dataset.timestamp
-    payload["time_step"] = dataset.time_step
-    if isinstance(dataset, PreprocessedDataset):
-        payload["available_views"] = dataset.available_views
-    if cache is not None:
-        cache[path] = payload
-    return payload

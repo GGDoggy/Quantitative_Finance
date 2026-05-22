@@ -41,3 +41,14 @@ def test_app_registry_can_import_src_plotlib_without_reverse_dependency() -> Non
     _clear_modules("src.app_plot_registry", "src.plotlib")
     importlib.import_module("src.plotlib")
     assert "src.app_plot_registry" not in sys.modules
+
+
+def test_src_plots_package_is_removed() -> None:
+    _clear_modules("src.plots")
+
+    try:
+        importlib.import_module("src.plots")
+    except ModuleNotFoundError:
+        return
+
+    raise AssertionError("src.plots should not be importable after Stage C removal.")

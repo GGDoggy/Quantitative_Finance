@@ -1,4 +1,13 @@
 from .errors import PayloadSchemaVersionError
+from .loaders import (
+    SIMULATION_REQUIRED_KEYS,
+    load_orderbook_payload,
+    load_orderbook_payloads,
+    load_simulation_arrays,
+    load_simulation_arrays_from_metadata,
+    load_trades_payload,
+    load_trades_payloads,
+)
 from .options import (
     ConditionalFillProbabilityPlotSettings,
     DashboardSimulationHeatmapSettings,
@@ -11,7 +20,6 @@ from .options import (
     ProfitPlotSettings,
     SimulationHeatmapSettings,
 )
-from .protocols import PlotBuilder, PlotDatasetLocator
 from .types import (
     OrderbookPayloadV1,
     SchemaVersionV1,
@@ -42,11 +50,10 @@ __all__ = [
     "OptionalColorRange",
     "OptionalSymmetricColorRange",
     "PayloadSchemaVersionError",
-    "PlotBuilder",
-    "PlotDatasetLocator",
     "PlotRenderOptions",
     "ProfitPlotSettings",
     "SchemaVersionV1",
+    "SIMULATION_REQUIRED_KEYS",
     "SimulationArraysV1",
     "SimulationHeatmapSettings",
     "TradesPayloadV1",
@@ -58,6 +65,12 @@ __all__ = [
     "build_orderbook_view",
     "build_trade_volume_timeline_view",
     "build_trades_scatter_view",
+    "load_orderbook_payload",
+    "load_orderbook_payloads",
+    "load_simulation_arrays",
+    "load_simulation_arrays_from_metadata",
+    "load_trades_payload",
+    "load_trades_payloads",
     "normalize_orderbook_payload_to_v1",
     "normalize_simulation_arrays_to_v1",
     "normalize_trades_payload_to_v1",

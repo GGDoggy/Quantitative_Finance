@@ -2,51 +2,12 @@ from __future__ import annotations
 
 from functools import partial
 
-from bokeh.models import BasicTicker, ColorBar, LinearColorMapper
-import holoviews as hv
-from holoviews.operation.datashader import dynspread, rasterize, shade
 import numpy as np
 import pandas as pd
 
-from .errors import PreprocessedDataError
-from .settings import PlotRenderOptions
 from src.plotlib.errors import PayloadSchemaVersionError
-from src.plotlib.types import OrderbookPayloadV1, normalize_orderbook_payload_to_v1
-from src.preprocess.catalog import PlotDatasetLocator
-
-
-ORDERBOOK_REQUIRED_KEYS = ("price_axis", "time_axis", "data", "bid", "ask")
-ORDERBOOK_OPTIONAL_KEYS = ("mid",)
-
-
-def _orderbook_path(locator: PlotDatasetLocator):
-    return locator.preprocessed_dir / f"{locator.base_id}-orderbook_for_plot.npz"
-
-
-def _load_orderbook_payload(locator: PlotDatasetLocator) -> OrderbookPayloadV1:
-    path = _orderbook_path(locator)
-    if not path.is_file():
-        raise FileNotFoundError(f"Orderbook dataset file does not exist: {path}")
-
-    try:
-        with np.load(path, allow_pickle=False) as data:
-            missing_keys = [key for key in ORDERBOOK_REQUIRED_KEYS if key not in data.files]
-            if missing_keys:
-                raise KeyError(
-                    f"Orderbook dataset {path.name} is missing required key(s): {', '.join(missing_keys)}"
-                )
-
-            payload = {key: data[key] for key in ORDERBOOK_REQUIRED_KEYS}
-            payload.update({key: data[key] for key in ORDERBOOK_OPTIONAL_KEYS if key in data.files})
-    except KeyError:
-        raise
-    except (OSError, ValueError) as error:
-        raise PreprocessedDataError(f"Failed to load orderbook dataset {path.name}: {error}") from error
-
-    payload["product_id"] = locator.product_id
-    payload["timestamp"] = locator.timestamp
-    payload["time_step"] = locator.time_step
-    return normalize_orderbook_payload_to_v1(payload)
+from src.plotlib.options import PlotRenderOptions
+from src.plotlib.types import OrderbookPayloadV1
 
 
 PLOT_WIDTH = 1200
@@ -84,10 +45,16 @@ HEATMAP_COLORS = interpolate_palette(HEATMAP_COLOR_ANCHORS)
 
 
 def add_heatmap_colorbar(plot, _):
+    from bokeh.models import BasicTicker, ColorBar, LinearColorMapper
+
     if getattr(plot.state, "_orderbook_colorbar_added", False):
         return
 
-    color_mapper = LinearColorMapper(palette=HEATMAP_COLORS, low=HEATMAP_CLIM[0], high=HEATMAP_CLIM[1])
+    color_mapper = LinearColorMapper(
+        palette=HEATMAP_COLORS,
+        low=HEATMAP_CLIM[0],
+        high=HEATMAP_CLIM[1],
+    )
     color_bar = ColorBar(
         color_mapper=color_mapper,
         ticker=BasicTicker(desired_num_ticks=7),
@@ -99,6 +66,8 @@ def add_heatmap_colorbar(plot, _):
 
 
 def get_canvas_full(x_range, y_range, time_axis, price_axis, volume, default_range):
+    import holoviews as hv
+
     if x_range is None or x_range[0] is None or y_range is None or y_range[0] is None:
         x_range, y_range = default_range
 
@@ -129,6 +98,8 @@ def get_canvas_full(x_range, y_range, time_axis, price_axis, volume, default_ran
 
 
 def get_price_line(x_range, y_range, raw: pd.DataFrame, name: str, color: str, default_range):
+    import holoviews as hv
+
     if x_range is None or x_range[0] is None:
         x_range = default_range
 
@@ -138,24 +109,27 @@ def get_price_line(x_range, y_range, raw: pd.DataFrame, name: str, color: str, d
     value_col = next(column for column in raw.columns if column != "Time")
 
     if keeping.empty:
-        return hv.Curve([], kdims=["Time"], vdims=[value_col], label=name).opts(color=color, line_width=2)
+        return hv.Curve([], kdims=["Time"], vdims=[value_col], label=name).opts(
+            color=color, line_width=2
+        )
 
-    return hv.Curve(keeping, kdims=["Time"], vdims=[value_col], label=name).opts(color=color, line_width=2)
+    return hv.Curve(keeping, kdims=["Time"], vdims=[value_col], label=name).opts(
+        color=color, line_width=2
+    )
 
 
 def _normalize_payload(payload: OrderbookPayloadV1) -> dict[str, object]:
     if payload.get("schema_version") != "1":
-        raise PayloadSchemaVersionError("orderbook payload", "1", payload.get("schema_version"))
+        raise PayloadSchemaVersionError(
+            "orderbook payload", "1", payload.get("schema_version")
+        )
     price_axis = np.asarray(payload["price_axis"], dtype=float)
     time_axis = pd.to_datetime(np.asarray(payload["time_axis"]))
     raw_volume = np.asarray(payload["data"], dtype=float).T
     signed_volume = np.sign(raw_volume) * np.log1p(np.abs(raw_volume))
     bid = np.asarray(payload["bid"], dtype=float)
     ask = np.asarray(payload["ask"], dtype=float)
-    if "mid" in payload:
-        mid = np.asarray(payload["mid"], dtype=float)
-    else:
-        mid = 0.5 * (bid + ask)
+    mid = np.asarray(payload["mid"], dtype=float)
 
     return {
         "product_id": payload["product_id"],
@@ -168,7 +142,7 @@ def _normalize_payload(payload: OrderbookPayloadV1) -> dict[str, object]:
     }
 
 
-def _merge_payloads(payloads: list[dict[str, object]]) -> dict[str, object]:
+def _merge_payloads(payloads: list[OrderbookPayloadV1]) -> dict[str, object]:
     if not payloads:
         raise ValueError("No orderbook payloads available.")
 
@@ -225,10 +199,13 @@ def _merge_payloads(payloads: list[dict[str, object]]) -> dict[str, object]:
 
 
 def build_orderbook_view(
-    locators: list[PlotDatasetLocator],
+    payloads: list[OrderbookPayloadV1],
     render_options: PlotRenderOptions | None = None,
 ):
-    payloads = [_load_orderbook_payload(locator) for locator in locators]
+    import holoviews as hv
+    from holoviews.operation.datashader import dynspread, rasterize, shade
+
+    del render_options
     merged = _merge_payloads(payloads)
     raw_time_axis = merged["time_axis"]
     raw_price_axis = merged["price_axis"]
@@ -260,13 +237,35 @@ def build_orderbook_view(
     heatmap = hv.DynamicMap(get_canvas, streams=[range_stream])
     range_stream.source = heatmap
 
-    rasterized_heatmap = rasterize(heatmap, width=PLOT_WIDTH, height=PLOT_HEIGHT, dynamic=True)
-    shaded_heatmap = shade(rasterized_heatmap, cmap=HEATMAP_COLORS, clims=HEATMAP_CLIM, cnorm="linear")
+    rasterized_heatmap = rasterize(
+        heatmap, width=PLOT_WIDTH, height=PLOT_HEIGHT, dynamic=True
+    )
+    shaded_heatmap = shade(
+        rasterized_heatmap, cmap=HEATMAP_COLORS, clims=HEATMAP_CLIM, cnorm="linear"
+    )
     spread_heatmap = dynspread(shaded_heatmap, threshold=0.8, max_px=10)
 
-    get_bid = partial(get_price_line, raw=raw_bid, name="bid", color="#0FB353", default_range=(start_time, end_time))
-    get_ask = partial(get_price_line, raw=raw_ask, name="ask", color="#E23E1E", default_range=(start_time, end_time))
-    get_mid = partial(get_price_line, raw=raw_mid, name="mid", color="#3979B9", default_range=(start_time, end_time))
+    get_bid = partial(
+        get_price_line,
+        raw=raw_bid,
+        name="bid",
+        color="#0FB353",
+        default_range=(start_time, end_time),
+    )
+    get_ask = partial(
+        get_price_line,
+        raw=raw_ask,
+        name="ask",
+        color="#E23E1E",
+        default_range=(start_time, end_time),
+    )
+    get_mid = partial(
+        get_price_line,
+        raw=raw_mid,
+        name="mid",
+        color="#3979B9",
+        default_range=(start_time, end_time),
+    )
 
     bid_line = hv.DynamicMap(get_bid, streams=[range_stream])
     ask_line = hv.DynamicMap(get_ask, streams=[range_stream])
