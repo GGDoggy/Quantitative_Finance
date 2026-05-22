@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 
-from src.app_plot_registry import APP_APP_PLOT_REGISTRY
+from src.app_plot_registry import APP_PLOT_REGISTRY
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
     get_algorithm,

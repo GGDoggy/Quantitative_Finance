@@ -6,12 +6,17 @@ can determine available views without depending on plotting internals.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Callable, Literal, Protocol
 
 from src.plots.registry import PLOT_REGISTRY
-from src.preprocess.catalog import PreprocessedDataset
 
 PayloadType = Literal["orderbook", "trades", "simulation"]
+
+
+@dataclass(frozen=True)
+class SupportsAppPlotDataset(Protocol):
+    path: object
+    simulation_path: object
 
 
 @dataclass(frozen=True)
@@ -21,19 +26,19 @@ class AppPlotEntry:
     ui_group: str
     builder: Callable[..., object]
     required_payload_type: PayloadType
-    supports_dataset: Callable[[PreprocessedDataset], bool]
+    supports_dataset: Callable[[SupportsAppPlotDataset], bool]
 
 
-def _supports_orderbook(dataset: PreprocessedDataset) -> bool:
+def _supports_orderbook(dataset: SupportsAppPlotDataset) -> bool:
     return dataset.path.name.endswith("-orderbook_for_plot.npz")
 
 
-def _supports_trades(dataset: PreprocessedDataset) -> bool:
+def _supports_trades(dataset: SupportsAppPlotDataset) -> bool:
     # Trades payload is embedded in the same preprocessed orderbook dataset.
     return _supports_orderbook(dataset)
 
 
-def _supports_simulation(dataset: PreprocessedDataset) -> bool:
+def _supports_simulation(dataset: SupportsAppPlotDataset) -> bool:
     return dataset.simulation_path is not None
 
 
