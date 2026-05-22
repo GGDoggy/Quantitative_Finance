@@ -8,6 +8,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.preprocess.catalog import PlotDatasetLocator, find_simulation_files
+from src.plotlib.errors import PayloadSchemaVersionError
+from src.plotlib.types import normalize_simulation_arrays_to_v1
 from src.plots.settings import (
     FillProbabilityPlotSettings,
     PlotRenderOptions,
@@ -81,13 +83,19 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
             ask_opp_size.append(np.asarray(data["ask_opp_size"], dtype=float))
             ask_result.append(np.asarray(data["ask_result"], dtype=int))
 
-    return (
-        np.concatenate(bid_near_size) if bid_near_size else np.array([], dtype=float),
-        np.concatenate(bid_opp_size) if bid_opp_size else np.array([], dtype=float),
-        np.concatenate(bid_result) if bid_result else np.array([], dtype=int),
-        np.concatenate(ask_near_size) if ask_near_size else np.array([], dtype=float),
-        np.concatenate(ask_opp_size) if ask_opp_size else np.array([], dtype=float),
-        np.concatenate(ask_result) if ask_result else np.array([], dtype=int),
+    return normalize_simulation_arrays_to_v1(
+        {
+            "bid_near_size": np.concatenate(bid_near_size) if bid_near_size else np.array([], dtype=float),
+            "bid_opp_size": np.concatenate(bid_opp_size) if bid_opp_size else np.array([], dtype=float),
+            "bid_result": np.concatenate(bid_result) if bid_result else np.array([], dtype=int),
+            "ask_near_size": np.concatenate(ask_near_size) if ask_near_size else np.array([], dtype=float),
+            "ask_opp_size": np.concatenate(ask_opp_size) if ask_opp_size else np.array([], dtype=float),
+            "ask_result": np.concatenate(ask_result) if ask_result else np.array([], dtype=int),
+            "bid_mid_profit": np.array([], dtype=float),
+            "ask_mid_profit": np.array([], dtype=float),
+            "bid_micro_profit": np.array([], dtype=float),
+            "ask_micro_profit": np.array([], dtype=float),
+        }
     )
 
 
@@ -315,14 +323,15 @@ def build_fill_probability_view(
         else FillProbabilityPlotSettings()
     )
     simulation_paths = [_simulation_path(locator) for locator in locators]
-    (
-        bid_near_size,
-        bid_opp_size,
-        bid_result,
-        ask_near_size,
-        ask_opp_size,
-        ask_result,
-    ) = load_simulation_arrays(simulation_paths)
+    arrays = load_simulation_arrays(simulation_paths)
+    if arrays.get("schema_version") != "1":
+        raise PayloadSchemaVersionError("simulation arrays", "1", arrays.get("schema_version"))
+    bid_near_size = arrays["bid_near_size"]
+    bid_opp_size = arrays["bid_opp_size"]
+    bid_result = arrays["bid_result"]
+    ask_near_size = arrays["ask_near_size"]
+    ask_opp_size = arrays["ask_opp_size"]
+    ask_result = arrays["ask_result"]
 
     shared_count_zmax = _shared_sample_count_zmax(
         (bid_near_size, bid_opp_size, bid_result),
