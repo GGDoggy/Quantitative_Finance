@@ -46,6 +46,11 @@ class SimulationArraysV1(TypedDict):
 
 
 def normalize_orderbook_payload_to_v1(payload: dict[str, object]) -> OrderbookPayloadV1:
+    bid = np.asarray(payload["bid"])
+    ask = np.asarray(payload["ask"])
+    mid_payload = payload.get("mid")
+    mid = np.asarray(mid_payload) if mid_payload is not None else 0.5 * (bid + ask)
+
     return {
         "schema_version": "1",
         "product_id": str(payload["product_id"]),
@@ -54,9 +59,9 @@ def normalize_orderbook_payload_to_v1(payload: dict[str, object]) -> OrderbookPa
         "price_axis": np.asarray(payload["price_axis"]),
         "time_axis": np.asarray(payload["time_axis"]),
         "data": np.asarray(payload["data"]),
-        "bid": np.asarray(payload["bid"]),
-        "ask": np.asarray(payload["ask"]),
-        "mid": np.asarray(payload["mid"]),
+        "bid": bid,
+        "ask": ask,
+        "mid": mid,
     }
 
 
