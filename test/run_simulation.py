@@ -17,15 +17,15 @@ from src.simulation import (  # noqa: E402
     simulate_loaded_data,
 )
 from src.simulation.constants import DEFAULT_RESOLVED_TIME  # noqa: E402
+from src.simulation.io import load_raw_dataset, parse_dataset_groups  # noqa: E402
 from src.simulation.library import (  # noqa: E402
     get_default_worker_count,
-    load_dataset,
     process_dataset_job,
 )
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-def _parse_dataset_groups(data_v3_path):
+def _parse_dataset_groups_legacy(data_v3_path):
     grouped = {}
     for path in sorted(Path(data_v3_path).glob("*.csv")):
         stem_parts = path.stem.split("-")
@@ -71,8 +71,8 @@ def _build_output_path(output_path, product_id, timestamp, time_step, algorithm_
 def _is_processed(dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
     return _build_output_path(
         output_path,
-        dataset["product_id"],
-        dataset["timestamp"],
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
         algorithm_name,
         resolved_time,
@@ -82,13 +82,13 @@ def _is_processed(dataset, output_path, time_step, algorithm_name, resolved_time
 def _format_dataset_line(index, dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
     output_file = _build_output_path(
         output_path,
-        dataset["product_id"],
-        dataset["timestamp"],
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
         algorithm_name,
         resolved_time,
     )
-    return f"[{index}] {dataset['file_stem']} -> {output_file.name}"
+    return f"[{index}] {dataset.file_stem} -> {output_file.name}"
 
 
 def _parse_selection(selection, item_count):
@@ -147,7 +147,7 @@ def prompt_dataset_selection(datasets, output_path, time_step, algorithm_name):
 
 
 def _process_dataset(dataset, output_path, algorithm_name, time_step, base_tick):
-    loaded_data = load_dataset(dataset)
+    loaded_data = load_raw_dataset(dataset)
     result = simulate_loaded_data(
         loaded_data,
         algorithm_name=algorithm_name,
@@ -171,7 +171,7 @@ def main(
     base_tick=DEFAULT_BASE_TICK,
 ):
     algorithm_name = prompt_algorithm_selection()
-    datasets = _parse_dataset_groups(data_v3_path)
+    datasets = parse_dataset_groups(data_v3_path)
     pending = [
         dataset
         for dataset in datasets
@@ -185,7 +185,7 @@ def main(
     selected = prompt_dataset_selection(pending, output_path, time_step, algorithm_name)
     if len(selected) == 1:
         dataset = selected[0]
-        print(f"Processing {dataset['file_stem']} with {algorithm_name}...")
+        print(f"Processing {dataset.file_stem} with {algorithm_name}...")
         output_file = _process_dataset(dataset, output_path, algorithm_name, time_step, base_tick)
         print(f"Saved {output_file}")
         return
@@ -209,10 +209,10 @@ def main(
             dataset = future_to_dataset[future]
             try:
                 job_result = future.result()
-                print(f"Saved {job_result['output_file']}")
+                print(f"Saved {job_result.output_file}")
             except Exception as exc:
-                failures.append((dataset["file_stem"], exc))
-                print(f"Failed {dataset['file_stem']}: {exc}")
+                failures.append((dataset.file_stem, exc))
+                print(f"Failed {dataset.file_stem}: {exc}")
 
     if failures:
         failed_stems = ", ".join(file_stem for file_stem, _exc in failures)
