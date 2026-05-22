@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 
 from src.preprocess.catalog import PlotDatasetLocator
 
-from .errors import PreprocessedDataError
+from src.preprocess.exceptions import PreprocessedDataError
 from .settings import PlotRenderOptions
 
 

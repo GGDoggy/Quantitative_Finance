@@ -1,3 +1,11 @@
+from .exceptions import (
+    PreprocessError,
+    PreprocessOutputConflictError,
+    PreprocessValidationError,
+    PreprocessedDataError,
+    PreprocessedDataFileError,
+    PreprocessedDataSchemaError,
+)
 from .catalog import (
     PlotDatasetLocator,
     PreprocessedDataset,
