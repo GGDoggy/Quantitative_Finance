@@ -82,7 +82,15 @@ def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolv
 
 def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("save_simulation_npz")
-    return _save_simulation_npz(_to_dataset(dataset), output_path, algorithm_name, time_step, base_tick, result, resolved_time)
+    return _save_simulation_npz(
+        _to_dataset(dataset),
+        Path(output_path),
+        algorithm_name,
+        time_step,
+        base_tick,
+        result,
+        resolved_time,
+    )
 
 
 def format_dataset_line(index, dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
