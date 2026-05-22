@@ -30,6 +30,29 @@ Coinbase market-data collection, visualization, and simulation experiments.
 - `webUI.py` serves the local Panel app with `show=True`.
 - No standalone preprocess CLI entry point is currently provided.
 
+
+## Simulation CLI
+
+Use an editable install so `src.simulation` is imported as a normal package (no `sys.path` hacks):
+
+```bash
+pip install -e .
+```
+
+Run the interactive simulation CLI via module or console script:
+
+```bash
+python -m src.simulation
+# or
+qf-simulation
+```
+
+Legacy wrapper is still available:
+
+```bash
+python test/run_simulation.py
+```
+
 ## Data Layout
 
 ### v1
