@@ -8,7 +8,7 @@ from holoviews.operation.datashader import dynspread, rasterize, shade
 import numpy as np
 import pandas as pd
 
-from .errors import PreprocessedDataError
+from src.preprocess.exceptions import PreprocessedDataError
 from .settings import PlotRenderOptions
 from src.preprocess.catalog import PlotDatasetLocator
 

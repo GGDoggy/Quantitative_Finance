@@ -11,7 +11,12 @@ from typing import Callable, Iterable, MutableMapping
 
 import numpy as np
 
-from src.plots.errors import PreprocessedDataError
+from src.preprocess.exceptions import (
+    PreprocessedDataError,
+    PreprocessValidationError,
+    PreprocessedDataFileError,
+    PreprocessedDataSchemaError,
+)
 from src.plots.registry import PLOT_REGISTRY
 from src.preprocess.adapters.plot_registry_detector import PlotRegistryViewDetector
 from src.simulation.constants import DEFAULT_RESOLVED_TIME
@@ -70,10 +75,10 @@ def format_time_step(time_step: float | str | Decimal) -> str:
     try:
         decimal_value = Decimal(str(time_step))
     except InvalidOperation as error:
-        raise ValueError(f"Invalid time step: {time_step!r}") from error
+        raise PreprocessValidationError(f"Invalid time step: {time_step!r}") from error
 
     if not decimal_value.is_finite() or decimal_value <= 0:
-        raise ValueError(f"Time step must be a positive finite value: {time_step!r}")
+        raise PreprocessValidationError(f"Time step must be a positive finite value: {time_step!r}")
 
     normalized = decimal_value.normalize()
     if normalized == normalized.to_integral():
@@ -102,10 +107,10 @@ def _simulation_value_tokens(
     try:
         decimal_value = Decimal(str(value))
     except InvalidOperation as error:
-        raise ValueError(f"Invalid resolved time: {value!r}") from error
+        raise PreprocessValidationError(f"Invalid resolved time: {value!r}") from error
 
     if not decimal_value.is_finite() or decimal_value < 0:
-        raise ValueError(f"Resolved time must be a non-negative finite value: {value!r}")
+        raise PreprocessValidationError(f"Resolved time must be a non-negative finite value: {value!r}")
 
     normalized_value = decimal_value.normalize()
     if normalized_value == normalized_value.to_integral():
@@ -349,7 +354,7 @@ def detect_available_views(
                 detector = view_detector or _default_view_detector
                 available_views = detector(data_keys)
     except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
+        raise PreprocessedDataFileError(f"Failed to inspect {path.name}: {error}") from error
 
     if (
         dataset_hint is not None
@@ -596,7 +601,26 @@ def load_preprocessed_payload(
         with np.load(path, allow_pickle=False) as data:
             payload = {key: data[key] for key in data.files}
     except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise PreprocessedDataError(f"Failed to load {path.name}: {error}") from error
+        raise PreprocessedDataFileError(f"Failed to load {path.name}: {error}") from error
+
+    required_fields = ("price_axis", "time_axis", "data", "bid", "ask")
+    missing_fields = tuple(field for field in required_fields if field not in payload)
+    if missing_fields:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} is missing required fields: {missing_fields}."
+        )
+
+    if not (
+        payload["data"].shape == payload["bid"].shape == payload["ask"].shape
+    ):
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has mismatched data/bid/ask shapes."
+        )
+
+    if payload["time_axis"].ndim != 1 or payload["price_axis"].ndim != 1:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has invalid axis dimensionality."
+        )
 
     payload["product_id"] = dataset.product_id
     payload["timestamp"] = dataset.timestamp

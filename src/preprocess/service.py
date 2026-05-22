@@ -14,6 +14,7 @@ from src.preprocess.catalog import (
     format_time_step,
 )
 from src.preprocess.common import build_context
+from src.preprocess.exceptions import PreprocessOutputConflictError
 
 
 DEFAULT_TIME_STEP = 0.01
@@ -43,11 +44,11 @@ def _merge_payload_chunk(base_payload: dict[str, object], chunk: dict[str, objec
                 value,
                 equal_nan=True,
             ):
-                raise ValueError(f"Conflicting preprocess outputs for key '{key}'.")
+                raise PreprocessOutputConflictError(f"Conflicting preprocess outputs for key '{key}'.")
             continue
 
         if existing != value:
-            raise ValueError(f"Conflicting preprocess outputs for key '{key}'.")
+            raise PreprocessOutputConflictError(f"Conflicting preprocess outputs for key '{key}'.")
 
 
 def preprocess_batch(
