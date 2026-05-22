@@ -19,7 +19,14 @@ from .library import (
     save_simulation_npz,
 )
 from .constants import DEFAULT_RESOLVED_TIME
-from .service import SimulationJobResult, simulate_batch, simulate_batches
+from .models import (
+    LoadedMarketData,
+    RawSimulationDataset,
+    SimulationJobResult,
+    SimulationRequest,
+    SimulationResult,
+)
+from .service import simulate_batch, simulate_batches
 from .time_averaged_random_cancellation import (
     ALGORITHM_NAME as TIME_AVERAGED_RANDOM_CANCELLATION_NAME,
 )
@@ -46,7 +53,11 @@ __all__ = [
     "run_dataset_simulation",
     "run_datasets_in_parallel",
     "save_simulation_npz",
+    "LoadedMarketData",
+    "RawSimulationDataset",
     "SimulationJobResult",
+    "SimulationRequest",
+    "SimulationResult",
     "simulate_batch",
     "simulate_batches",
 ]
