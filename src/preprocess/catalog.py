@@ -21,6 +21,9 @@ from src.plots.registry import PLOT_REGISTRY
 from src.preprocess.adapters.plot_registry_detector import PlotRegistryViewDetector
 from src.simulation.constants import DEFAULT_RESOLVED_TIME
 
+# Keep backward-compatible matching for legacy simulation filenames that omit
+# the -resolved-<token> segment.
+DEFAULT_RESOLVED_TIME_FALLBACK = DEFAULT_RESOLVED_TIME
 
 
 ViewDetector = Callable[[Iterable[str]], tuple[str, ...]]
@@ -130,12 +133,13 @@ def _matches_resolved_time(
     metadata_resolved_time_token: str | None,
     resolved_time: float | None,
     resolved_time_tokens: set[str],
+    resolved_time_fallback: float = DEFAULT_RESOLVED_TIME_FALLBACK,
 ) -> bool:
     if resolved_time is None:
         return True
 
     if metadata_resolved_time is None:
-        return resolved_time == DEFAULT_RESOLVED_TIME
+        return resolved_time == resolved_time_fallback
 
     return (
         metadata_resolved_time_token in resolved_time_tokens
@@ -169,6 +173,7 @@ def find_simulation_files(
     resolved_time: float | None = None,
     resolved_time_token: str | None = None,
     algorithm_name: str | None = None,
+    resolved_time_fallback: float = DEFAULT_RESOLVED_TIME_FALLBACK,
 ) -> tuple[Path, ...]:
     candidates: list[Path] = []
     time_step_tokens = set(_simulation_time_step_tokens(time_step, time_step_token))
@@ -198,6 +203,7 @@ def find_simulation_files(
             metadata.resolved_time_token,
             resolved_time,
             resolved_time_tokens,
+            resolved_time_fallback=resolved_time_fallback,
         ):
             continue
 
@@ -212,6 +218,7 @@ def has_simulation_file(
     timestamp: str,
     time_step: float,
     time_step_token: str | None = None,
+    resolved_time_fallback: float = DEFAULT_RESOLVED_TIME_FALLBACK,
 ) -> bool:
     return bool(
         find_simulation_files(
@@ -220,6 +227,7 @@ def has_simulation_file(
             timestamp,
             time_step,
             time_step_token,
+            resolved_time_fallback=resolved_time_fallback,
         )
     )
 

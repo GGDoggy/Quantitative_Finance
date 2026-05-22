@@ -21,3 +21,29 @@ from .catalog import (
 )
 from .common import PreprocessContext, build_context
 from .service import DEFAULT_TIME_STEP, preprocess_batch, preprocess_batches
+
+
+__all__ = [
+    "PreprocessError",
+    "PreprocessOutputConflictError",
+    "PreprocessValidationError",
+    "PreprocessedDataError",
+    "PreprocessedDataFileError",
+    "PreprocessedDataSchemaError",
+    "PlotDatasetLocator",
+    "PreprocessedDataset",
+    "RawBatch",
+    "detect_available_views",
+    "discover_preprocessed_datasets",
+    "discover_raw_batches",
+    "find_simulation_files",
+    "format_time_step",
+    "has_simulation_file",
+    "load_preprocessed_payload",
+    "parse_timestamp",
+    "PreprocessContext",
+    "build_context",
+    "DEFAULT_TIME_STEP",
+    "preprocess_batch",
+    "preprocess_batches",
+]
