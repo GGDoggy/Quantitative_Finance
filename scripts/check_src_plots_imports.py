@@ -15,7 +15,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST_PATH = ROOT / "tools" / "src_plots_import_allowlist.txt"
-IMPORT_RE = re.compile(r"\b(from\s+src\.plots\b|import\s+src\.plots\b)")
+IMPORT_RE = re.compile(
+    r"\b(from\s+src\.plots\b|import\s+src\.plots\b|from\s+src\s+import\s+[^\n#]*\bplots\b)"
+)
 
 
 def _iter_py_files() -> list[Path]:

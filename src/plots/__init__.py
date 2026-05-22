@@ -24,12 +24,15 @@ from __future__ import annotations
 
 import warnings
 
-warnings.warn(
-    "src.plots is deprecated and will be removed after migration to src.plotlib. "
-    "Please migrate imports.",
-    DeprecationWarning,
-    stacklevel=2,
-)
+
+def warn_deprecated_import() -> None:
+    """Emit deprecation warning for callers that opt in to migration nudges."""
+    warnings.warn(
+        "src.plots is deprecated and will be removed after migration to src.plotlib. "
+        "Please migrate imports.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 from .errors import PreprocessedDataError
 from .registry import PLOT_LABELS, PLOT_REGISTRY, PlotSpec
@@ -42,4 +45,5 @@ __all__ = [
     "PlotRenderOptions",
     "PlotSpec",
     "PreprocessedDataError",
+    "warn_deprecated_import",
 ]

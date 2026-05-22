@@ -1,4 +1,4 @@
-"""Deprecated shim module for legacy src.plots imports.
+"""Deprecated shim module for legacy ``src.plots`` imports.
 
 Register plot types with their lazy plot and preprocess builders.
 """
