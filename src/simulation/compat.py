@@ -20,7 +20,6 @@ from .constants import DEFAULT_RESOLVED_TIME
 from .io import load_raw_dataset as _load_raw_dataset, parse_dataset_groups as _parse_dataset_groups
 from .models import RawSimulationDataset, SimulationRequest
 from .runner import run_dataset_simulation as _run_dataset_simulation
-from .service import save_result as _save_result
 from .library import (
     build_output_path as _build_output_path,
     format_dataset_line as _format_dataset_line,
@@ -30,6 +29,7 @@ from .library import (
     parse_selection as _parse_selection,
     process_dataset_job as _process_dataset_job,
     run_datasets_in_parallel as _run_datasets_in_parallel,
+    save_simulation_npz as _save_simulation_npz,
 )
 
 _DEPRECATION_NOTE = "Use the new public API exported by src.simulation instead."
@@ -82,14 +82,14 @@ def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolv
 
 def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("save_simulation_npz")
-    return _save_result(
+    return _save_simulation_npz(
         _to_dataset(dataset),
-        output_dir=Path(output_path),
-        algorithm_name=algorithm_name,
-        time_step=time_step,
-        result=result,
-        base_tick=base_tick,
-        resolved_time=resolved_time,
+        Path(output_path),
+        algorithm_name,
+        time_step,
+        base_tick,
+        result,
+        resolved_time,
     )
 
 
