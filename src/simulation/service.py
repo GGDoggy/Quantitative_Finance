@@ -6,11 +6,12 @@ import math
 from typing import TYPE_CHECKING, Callable
 
 from .constants import DEFAULT_RESOLVED_TIME
-from .models import RawSimulationDataset, SimulationJobResult
+from .models import LoadedMarketData, RawSimulationDataset, SimulationJobResult, SimulationResult
 from .library import (
     DEFAULT_BASE_TICK,
     build_output_path,
     get_algorithm,
+    get_algorithm_names,
     run_datasets_in_parallel,
     run_dataset_simulation,
     save_simulation_npz,
@@ -51,6 +52,57 @@ def _to_simulation_dataset(raw_batch: RawBatch) -> RawSimulationDataset:
 def _saved_action_message(simulation_result: SimulationJobResult) -> str:
     action = "overwrote" if simulation_result.overwritten else "saved"
     return f"{action} {simulation_result.output_path.name}"
+
+
+def list_algorithms() -> list[str]:
+    """Return the registered simulation algorithm names."""
+    return get_algorithm_names()
+
+
+def simulate_loaded_data(
+    loaded_data: LoadedMarketData,
+    *,
+    algorithm_name: str,
+    time_step: float,
+    base_tick: float = DEFAULT_BASE_TICK,
+    resolved_time: float = DEFAULT_RESOLVED_TIME,
+) -> SimulationResult:
+    """Simulate from pre-loaded market arrays without re-reading CSV files."""
+    _validate_parameters(algorithm_name, time_step, resolved_time)
+    algorithm = get_algorithm(algorithm_name)
+    init, updates, trades, start_time = loaded_data
+    return algorithm(
+        init,
+        updates,
+        trades,
+        start_time,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+    )
+
+
+def save_result(
+    dataset: RawSimulationDataset,
+    *,
+    output_dir: Path,
+    algorithm_name: str,
+    time_step: float,
+    result: SimulationResult,
+    base_tick: float = DEFAULT_BASE_TICK,
+    resolved_time: float = DEFAULT_RESOLVED_TIME,
+) -> Path:
+    """Save one simulation result to npz using standard naming convention."""
+    _validate_parameters(algorithm_name, time_step, resolved_time)
+    return save_simulation_npz(
+        dataset,
+        output_dir,
+        algorithm_name,
+        time_step,
+        base_tick,
+        result,
+        resolved_time,
+    )
 
 
 def simulate_batch(
