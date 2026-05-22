@@ -9,8 +9,9 @@ from src.preprocess import (
     PreprocessedDataset,
     discover_preprocessed_datasets,
     discover_raw_batches,
+    format_time_step,
+    parse_timestamp,
 )
-from src.preprocess.catalog import format_time_step, parse_timestamp
 
 from .styles import SIMULATION_HEATMAP_PLOT_TYPES
 

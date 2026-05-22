@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from src.preprocess.catalog import PlotDatasetLocator
+from src.preprocess import PlotDatasetLocator
 
 from src.preprocess.exceptions import PreprocessedDataError
 from .settings import PlotRenderOptions

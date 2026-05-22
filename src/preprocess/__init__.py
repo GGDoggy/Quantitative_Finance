@@ -1,14 +1,4 @@
-"""Public API for preprocess discovery, loading, and batch preprocessing.
-
-Stable API surface:
-- Exceptions under ``src.preprocess.exceptions`` re-exported here.
-- Catalog models/discovery helpers used by dashboard and simulation flows.
-- Batch preprocess entry points in ``src.preprocess.service``.
-
-Internal APIs remain importable through explicit submodules. A small set of
-legacy symbols stays temporarily available from this package root and emits a
-DeprecationWarning.
-"""
+"""Public API for preprocess discovery, models, and batch preprocessing."""
 from __future__ import annotations
 
 from warnings import warn
@@ -22,58 +12,45 @@ from .exceptions import (
     PreprocessedDataSchemaError,
 )
 from .catalog import (
-    PlotDatasetLocator,
-    PreprocessedDataset,
-    RawBatch,
     discover_preprocessed_datasets,
     discover_raw_batches,
+    find_simulation_files,
+    format_time_step,
+    has_simulation_file,
     load_preprocessed_payload,
+    parse_timestamp,
 )
+from .models import PlotDatasetLocator, PreprocessContext, PreprocessedDataset, RawBatch
 from .service import DEFAULT_TIME_STEP, preprocess_batch, preprocess_batches
 
 
 __all__ = [
+    "RawBatch",
+    "PreprocessedDataset",
+    "PlotDatasetLocator",
+    "PreprocessContext",
+    "discover_raw_batches",
+    "discover_preprocessed_datasets",
+    "find_simulation_files",
+    "has_simulation_file",
+    "format_time_step",
+    "parse_timestamp",
+    "load_preprocessed_payload",
+    "DEFAULT_TIME_STEP",
+    "preprocess_batch",
+    "preprocess_batches",
     "PreprocessError",
     "PreprocessOutputConflictError",
     "PreprocessValidationError",
     "PreprocessedDataError",
     "PreprocessedDataFileError",
     "PreprocessedDataSchemaError",
-    "PlotDatasetLocator",
-    "PreprocessedDataset",
-    "RawBatch",
-    "discover_preprocessed_datasets",
-    "discover_raw_batches",
-    "load_preprocessed_payload",
-    "DEFAULT_TIME_STEP",
-    "preprocess_batch",
-    "preprocess_batches",
 ]
 
 _DEPRECATED_ALIASES = {
     "detect_available_views": (
         "src.preprocess.catalog.detect_available_views",
         "Import detect_available_views from src.preprocess.catalog instead.",
-    ),
-    "find_simulation_files": (
-        "src.preprocess.catalog.find_simulation_files",
-        "Import find_simulation_files from src.preprocess.catalog instead.",
-    ),
-    "format_time_step": (
-        "src.preprocess.catalog.format_time_step",
-        "Import format_time_step from src.preprocess.catalog instead.",
-    ),
-    "has_simulation_file": (
-        "src.preprocess.catalog.has_simulation_file",
-        "Import has_simulation_file from src.preprocess.catalog instead.",
-    ),
-    "parse_timestamp": (
-        "src.preprocess.catalog.parse_timestamp",
-        "Import parse_timestamp from src.preprocess.catalog instead.",
-    ),
-    "PreprocessContext": (
-        "src.preprocess.common.PreprocessContext",
-        "Import PreprocessContext from src.preprocess.common instead.",
     ),
     "build_context": (
         "src.preprocess.common.build_context",

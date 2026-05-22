@@ -17,7 +17,7 @@ from .library import (
 )
 
 if TYPE_CHECKING:
-    from src.preprocess.catalog import RawBatch
+    from src.preprocess import RawBatch
 
 
 @dataclass(frozen=True)

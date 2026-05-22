@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.preprocess.catalog import PlotDatasetLocator
+    from src.preprocess import PlotDatasetLocator
     from src.plots.settings import PlotRenderOptions
     from src.plots.types import PlotBuilder
 

@@ -7,14 +7,10 @@ from typing import Callable, Mapping, Protocol
 
 import numpy as np
 
-from src.preprocess.catalog import (
-    PreprocessedDataset,
-    RawBatch,
-    discover_preprocessed_datasets,
-    format_time_step,
-)
+from .catalog import discover_preprocessed_datasets, format_time_step
 from src.preprocess.common import build_context
 from src.preprocess.exceptions import PreprocessOutputConflictError
+from .models import PreprocessedDataset, RawBatch
 
 
 DEFAULT_TIME_STEP = 0.01

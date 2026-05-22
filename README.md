@@ -117,19 +117,22 @@ Trade batch:
 ### Stable public API (import from `src.preprocess`)
 
 - Exceptions: `PreprocessError`, `PreprocessValidationError`, `PreprocessOutputConflictError`, `PreprocessedDataError`, `PreprocessedDataFileError`, `PreprocessedDataSchemaError`
-- Catalog/data models: `RawBatch`, `PreprocessedDataset`, `PlotDatasetLocator`
-- Catalog entry points: `discover_raw_batches`, `discover_preprocessed_datasets`, `load_preprocessed_payload`
+- Catalog/data models: `RawBatch`, `PreprocessedDataset`, `PlotDatasetLocator`, `PreprocessContext`
+- Catalog entry points: `discover_raw_batches`, `discover_preprocessed_datasets`, `find_simulation_files`, `has_simulation_file`, `format_time_step`, `parse_timestamp`, `load_preprocessed_payload`
 - Preprocess services: `DEFAULT_TIME_STEP`, `preprocess_batch`, `preprocess_batches`
 
 ### Internal modules (import explicitly, no stability guarantee)
 
-- `src.preprocess.catalog` internals and filename/token helpers (for example: simulation filename matching, timestamp/time-step formatting helpers)
-- `src.preprocess.common` context construction details
+- `src.preprocess.catalog` internals except the legacy model re-exports `RawBatch`, `PreprocessedDataset`, and `PlotDatasetLocator`
+- `src.preprocess.common` internals except the legacy `PreprocessContext` re-export
+- Internal preprocess modules may import `src.preprocess.models` directly for shared types
 - Plot-specific preprocess builders under `src.preprocess.orderbook`, `src.preprocess.trades_scatter`, and `src.preprocess.trade_volume_timeline`
 - Adapters under `src.preprocess.adapters`
 
 ### Migration and deprecation rule
 
 - New code should prefer the stable package-level API above.
+- GUI, simulation orchestration, dashboard code, and API-surface tests should import stable names from `src.preprocess`.
+- Internal preprocess modules may import shared types from `src.preprocess.models`.
+- Do not add new external imports from `src.preprocess.catalog.RawBatch`, `src.preprocess.catalog.PreprocessedDataset`, or `src.preprocess.common.PreprocessContext`; those paths remain only as compatibility aliases.
 - If a caller needs an internal helper, import from the concrete internal module directly and treat it as refactorable.
-- Some legacy package-level names are currently kept as transitional aliases and emit `DeprecationWarning`; these aliases will be removed in a future cleanup.

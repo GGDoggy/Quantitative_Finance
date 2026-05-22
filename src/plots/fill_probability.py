@@ -7,7 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from src.preprocess.catalog import PlotDatasetLocator, find_simulation_files
+from src.preprocess import PlotDatasetLocator, find_simulation_files
 from src.plots.settings import (
     FillProbabilityPlotSettings,
     PlotRenderOptions,

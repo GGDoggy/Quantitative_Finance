@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
-from src.preprocess.catalog import PlotDatasetLocator
+from src.preprocess import PlotDatasetLocator
 
 from .settings import PlotRenderOptions
 from .trades_scatter import SIDE_COLORS, SIDE_LABELS, _extract_trades

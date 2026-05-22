@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.preprocess.catalog import RawBatch
+from src.preprocess import RawBatch
 from src.preprocess.service import preprocess_batch
 
 

@@ -3,28 +3,12 @@ from __future__ import annotations
 import calendar
 import csv
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Protocol
 
 import numpy as np
 
-
-class RawBatchLike(Protocol):
-    init_path: Path
-    updates_path: Path
-    trade_path: Path
-    timestamp: str
-
-
-@dataclass(frozen=True)
-class PreprocessContext:
-    batch: RawBatchLike
-    time_step: float
-    init_rows: list[list[float]]
-    updates_rows: list[list[float]]
-    trade_rows: list[list[float]]
+from .models import PreprocessContext, RawBatchLike
 
 
 def read_csv_rows(path: Path) -> list[list[float]]:
