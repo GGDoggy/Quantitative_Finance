@@ -18,8 +18,8 @@ class ImportRule:
 
 
 RULES = (
-    ImportRule("src.plotlib.renderers", "src.preprocess"),
-    ImportRule("src.plotlib.renderers", "gui"),
+    ImportRule("src.plotlib", "src.preprocess"),
+    ImportRule("src.plotlib", "gui"),
     ImportRule("src.preprocess.catalog", "src.plots"),
 )
 
@@ -40,15 +40,39 @@ def _module_name(path: Path) -> str:
     return ".".join(parts)
 
 
+def _is_type_checking_guard(test: ast.expr) -> bool:
+    return isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
+
+
+class _ImportCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.imported: set[str] = set()
+        self._ignore_depth = 0
+
+    def visit_If(self, node: ast.If) -> None:
+        if _is_type_checking_guard(node.test):
+            self._ignore_depth += 1
+            for stmt in node.body:
+                self.visit(stmt)
+            self._ignore_depth -= 1
+            for stmt in node.orelse:
+                self.visit(stmt)
+            return
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        if self._ignore_depth == 0:
+            self.imported.update(alias.name for alias in node.names)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if self._ignore_depth == 0 and node.module is not None:
+            self.imported.add(node.module)
+
+
 def _imported_modules(tree: ast.AST) -> set[str]:
-    imported: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module is not None:
-                imported.add(node.module)
-    return imported
+    collector = _ImportCollector()
+    collector.visit(tree)
+    return collector.imported
 
 
 def _matches_prefix(module: str, prefix: str) -> bool:
