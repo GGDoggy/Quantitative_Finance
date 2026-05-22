@@ -13,7 +13,12 @@ import numpy as np
 
 from src.plots.errors import PreprocessedDataError
 from src.plots.registry import PLOT_REGISTRY
-from src.plotlib.discovery import find_simulation_files, format_time_step, parse_simulation_filename
+from src.plotlib.discovery import (
+    SimulationFileMetadata,
+    find_simulation_files,
+    format_time_step,
+    parse_simulation_filename,
+)
 
 
 SIMULATION_VIEW_KEYS = (
@@ -22,6 +27,12 @@ SIMULATION_VIEW_KEYS = (
     "micro_profit",
     "mid_fill_probability_cost",
     "micro_fill_probability_cost",
+)
+
+
+PREPROCESSED_RE = re.compile(
+    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
+    r"(?P<time_step>\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)-orderbook_for_plot\.npz$"
 )
 
 
@@ -146,6 +157,26 @@ def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
     return sorted(
         entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix
     )
+
+
+
+def has_simulation_file(
+    preprocessed_dir: Path,
+    product_id: str,
+    timestamp: str,
+    time_step: float,
+    time_step_token: str | None = None,
+) -> bool:
+    return bool(
+        find_simulation_files(
+            preprocessed_dir,
+            product_id,
+            timestamp,
+            time_step,
+            time_step_token=time_step_token,
+        )
+    )
+
 
 
 def detect_available_views(
