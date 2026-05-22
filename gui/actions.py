@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 
-from src.plots import PLOT_REGISTRY
+from src.app_plot_registry import APP_APP_PLOT_REGISTRY
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
     get_algorithm,
@@ -260,11 +260,11 @@ class DashboardActionsMixin:
             (
                 view
                 for view in dataset.available_views
-                if view in PLOT_REGISTRY
+                if view in APP_PLOT_REGISTRY
                 and view not in SIMULATION_HEATMAP_PLOT_TYPES
             ),
             next(
-                (view for view in dataset.available_views if view in PLOT_REGISTRY),
+                (view for view in dataset.available_views if view in APP_PLOT_REGISTRY),
                 None,
             ),
         )

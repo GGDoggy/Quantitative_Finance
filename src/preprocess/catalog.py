@@ -12,7 +12,7 @@ from typing import Iterable, MutableMapping
 import numpy as np
 
 from src.plots.errors import PreprocessedDataError
-from src.plots.registry import PLOT_REGISTRY
+from src.app_plot_registry import APP_PLOT_REGISTRY
 from src.plotlib.discovery import (
     SimulationFileMetadata,
     find_simulation_files,
@@ -183,23 +183,32 @@ def detect_available_views(
     path: Path,
     dataset_hint: PlotDatasetLocator | None = None,
 ) -> tuple[str, ...]:
+    locator = dataset_hint or PlotDatasetLocator(
+        product_id="",
+        timestamp="19700101.000000",
+        time_step=0.01,
+        preprocessed_dir=path.parent,
+        original_path=path,
+    )
+
     try:
         with np.load(path, allow_pickle=False) as data:
             if "available_views" in data.files:
-                available_views = tuple(str(view) for view in data["available_views"].tolist())
+                encoded_views = tuple(str(view) for view in data["available_views"].tolist())
             else:
-                data_keys = set(data.files)
-                available_views = tuple(
-                    key
-                    for key, spec in PLOT_REGISTRY.items()
-                    if set(spec.required_payload_keys).issubset(data_keys)
-                )
+                encoded_views = tuple(APP_PLOT_REGISTRY.keys())
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
 
+    available_views = tuple(
+        plot_id
+        for plot_id, entry in APP_PLOT_REGISTRY.items()
+        if plot_id in encoded_views and entry.supports_dataset(locator)
+    )
+
     if (
         dataset_hint is not None
-        and any(view_key in PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
+        and any(view_key in APP_PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
         and has_simulation_file(
             dataset_hint.preprocessed_dir,
             dataset_hint.product_id,
@@ -213,7 +222,7 @@ def detect_available_views(
             tuple(
                 view_key
                 for view_key in SIMULATION_VIEW_KEYS
-                if view_key in PLOT_REGISTRY
+                if view_key in APP_PLOT_REGISTRY
             ),
         )
 
@@ -225,7 +234,7 @@ def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
     for view_group in view_groups:
         views.update(view_group)
 
-    ordered_views = [view for view in PLOT_REGISTRY if view in views]
+    ordered_views = [view for view in APP_PLOT_REGISTRY if view in views]
     ordered_views.extend(sorted(views - set(ordered_views)))
     return tuple(ordered_views)
 
@@ -337,7 +346,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                         tuple(
                             view_key
                             for view_key in SIMULATION_VIEW_KEYS
-                            if view_key in PLOT_REGISTRY
+                            if view_key in APP_PLOT_REGISTRY
                         ),
                     ),
                     time_step_token=time_step_token,
