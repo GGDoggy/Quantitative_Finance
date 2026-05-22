@@ -7,7 +7,6 @@ from typing import Callable
 
 import numpy as np
 
-from src.plots.registry import PLOT_REGISTRY
 from src.preprocess.catalog import (
     PreprocessedDataset,
     RawBatch,
@@ -15,6 +14,7 @@ from src.preprocess.catalog import (
     format_time_step,
 )
 from src.preprocess.common import build_context
+from src.preprocess.registry import PREPROCESS_PLOT_REGISTRY
 
 
 DEFAULT_TIME_STEP = 0.01
@@ -49,10 +49,7 @@ def preprocess_batch(
     payload: dict[str, object] = {}
     available_views: list[str] = []
 
-    for plot_key, spec in PLOT_REGISTRY.items():
-        if spec.preprocess_builder is None:
-            continue
-
+    for plot_key, spec in PREPROCESS_PLOT_REGISTRY.items():
         chunk = spec.preprocess_builder(context)
         if not all(required_key in chunk for required_key in spec.required_payload_keys):
             continue

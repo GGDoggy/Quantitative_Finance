@@ -8,7 +8,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Literal, Protocol
 
-from src.plots.registry import PLOT_REGISTRY
+from src.plotlib import (
+    build_fill_probability_view,
+    build_micro_cost_fill_probability_view,
+    build_micro_profit_view,
+    build_mid_cost_fill_probability_view,
+    build_mid_profit_view,
+    build_orderbook_view,
+    build_trade_volume_timeline_view,
+    build_trades_scatter_view,
+)
 
 PayloadType = Literal["orderbook", "trades", "simulation"]
 
@@ -47,7 +56,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="orderbook",
         label="Orderbook",
         ui_group="Market Data",
-        builder=PLOT_REGISTRY["orderbook"].plot_builder,
+        builder=build_orderbook_view,
         required_payload_type="orderbook",
         supports_dataset=_supports_orderbook,
     ),
@@ -55,7 +64,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="trades_scatter",
         label="Trades Scatter",
         ui_group="Market Data",
-        builder=PLOT_REGISTRY["trades_scatter"].plot_builder,
+        builder=build_trades_scatter_view,
         required_payload_type="trades",
         supports_dataset=_supports_trades,
     ),
@@ -63,7 +72,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="trade_volume_timeline",
         label="Trade Volume Timeline",
         ui_group="Market Data",
-        builder=PLOT_REGISTRY["trade_volume_timeline"].plot_builder,
+        builder=build_trade_volume_timeline_view,
         required_payload_type="trades",
         supports_dataset=_supports_trades,
     ),
@@ -71,7 +80,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="fill_probability",
         label="Fill Probability",
         ui_group="Simulation",
-        builder=PLOT_REGISTRY["fill_probability"].plot_builder,
+        builder=build_fill_probability_view,
         required_payload_type="simulation",
         supports_dataset=_supports_simulation,
     ),
@@ -79,7 +88,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="mid_profit",
         label="Mid Profit",
         ui_group="Simulation",
-        builder=PLOT_REGISTRY["mid_profit"].plot_builder,
+        builder=build_mid_profit_view,
         required_payload_type="simulation",
         supports_dataset=_supports_simulation,
     ),
@@ -87,7 +96,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="micro_profit",
         label="Micro Profit",
         ui_group="Simulation",
-        builder=PLOT_REGISTRY["micro_profit"].plot_builder,
+        builder=build_micro_profit_view,
         required_payload_type="simulation",
         supports_dataset=_supports_simulation,
     ),
@@ -95,7 +104,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="mid_fill_probability_cost",
         label="Mid Fill Probability > Cost",
         ui_group="Simulation",
-        builder=PLOT_REGISTRY["mid_fill_probability_cost"].plot_builder,
+        builder=build_mid_cost_fill_probability_view,
         required_payload_type="simulation",
         supports_dataset=_supports_simulation,
     ),
@@ -103,7 +112,7 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
         plot_id="micro_fill_probability_cost",
         label="Micro Fill Probability > Cost",
         ui_group="Simulation",
-        builder=PLOT_REGISTRY["micro_fill_probability_cost"].plot_builder,
+        builder=build_micro_cost_fill_probability_view,
         required_payload_type="simulation",
         supports_dataset=_supports_simulation,
     ),

@@ -8,7 +8,7 @@ import panel as pn
 from plotly.graph_objects import Figure
 
 from src.app_plot_registry import APP_PLOT_REGISTRY
-from src.plots import PlotRenderOptions
+from src.plotlib import PlotRenderOptions
 from src.preprocess import PlotDatasetLocator, PreprocessedDataset
 
 from .styles import (
