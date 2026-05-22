@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable, Protocol
 
 import numpy as np
 
-from src.plotlib.discovery import find_simulation_files
 from src.plotlib.types import normalize_simulation_arrays_to_v1
-from src.preprocess.catalog import PlotDatasetLocator
+
+if TYPE_CHECKING:
+    from src.preprocess.catalog import PlotDatasetLocator
+
+
+class _SimulationLocator(Protocol):
+    simulation_path: Path | None
+    preprocessed_dir: Path
+    product_id: str
+    timestamp: str
+    time_step: float
+    time_step_token: str | None
+    resolved_time: float | None
+    resolved_time_token: str | None
+    algorithm_name: str | None
+
+    @property
+    def base_id(self) -> str: ...
+
 
 SIMULATION_REQUIRED_KEYS = (
     "bid_near_size",
@@ -19,9 +36,11 @@ SIMULATION_REQUIRED_KEYS = (
 )
 
 
-def resolve_simulation_path(locator: PlotDatasetLocator) -> Path:
+def resolve_simulation_path(locator: _SimulationLocator) -> Path:
     if locator.simulation_path is not None:
         return locator.simulation_path
+
+    from src.plotlib.discovery import find_simulation_files
 
     candidates = find_simulation_files(
         locator.preprocessed_dir,

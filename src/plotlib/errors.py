@@ -12,3 +12,8 @@ class PayloadSchemaVersionError(ValueError):
         self.payload_name = payload_name
         self.expected = expected
         self.actual = actual
+
+
+class PreprocessedDataError(RuntimeError):
+    """Raised when preprocessed dataset inspection/loading fails."""
+
