@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 
 from src.plots.fill_probability import _simulation_path, _heatmap_trace
 from src.plots.profit_heatmap import load_simulation_arrays
+from src.plotlib.errors import PayloadSchemaVersionError
 from src.plots.settings import (
     ConditionalFillProbabilityPlotSettings,
     PlotRenderOptions,
@@ -132,6 +133,8 @@ def _grid_for_side(
 
 def _load_arrays(paths: Iterable[Path | str]) -> dict[str, np.ndarray]:
     arrays = load_simulation_arrays(paths)
+    if arrays.get("schema_version") != "1":
+        raise PayloadSchemaVersionError("simulation arrays", "1", arrays.get("schema_version"))
     result_arrays = {
         "bid_result": [],
         "ask_result": [],

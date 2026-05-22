@@ -10,6 +10,8 @@ import pandas as pd
 
 from .errors import PreprocessedDataError
 from .settings import PlotRenderOptions
+from src.plotlib.errors import PayloadSchemaVersionError
+from src.plotlib.types import OrderbookPayloadV1, normalize_orderbook_payload_to_v1
 from src.preprocess.catalog import PlotDatasetLocator
 
 
@@ -21,7 +23,7 @@ def _orderbook_path(locator: PlotDatasetLocator):
     return locator.preprocessed_dir / f"{locator.base_id}-orderbook_for_plot.npz"
 
 
-def _load_orderbook_payload(locator: PlotDatasetLocator) -> dict[str, object]:
+def _load_orderbook_payload(locator: PlotDatasetLocator) -> OrderbookPayloadV1:
     path = _orderbook_path(locator)
     if not path.is_file():
         raise FileNotFoundError(f"Orderbook dataset file does not exist: {path}")
@@ -44,7 +46,7 @@ def _load_orderbook_payload(locator: PlotDatasetLocator) -> dict[str, object]:
     payload["product_id"] = locator.product_id
     payload["timestamp"] = locator.timestamp
     payload["time_step"] = locator.time_step
-    return payload
+    return normalize_orderbook_payload_to_v1(payload)
 
 
 PLOT_WIDTH = 1200
@@ -141,7 +143,9 @@ def get_price_line(x_range, y_range, raw: pd.DataFrame, name: str, color: str, d
     return hv.Curve(keeping, kdims=["Time"], vdims=[value_col], label=name).opts(color=color, line_width=2)
 
 
-def _normalize_payload(payload: dict[str, object]) -> dict[str, object]:
+def _normalize_payload(payload: OrderbookPayloadV1) -> dict[str, object]:
+    if payload.get("schema_version") != "1":
+        raise PayloadSchemaVersionError("orderbook payload", "1", payload.get("schema_version"))
     price_axis = np.asarray(payload["price_axis"], dtype=float)
     time_axis = pd.to_datetime(np.asarray(payload["time_axis"]))
     raw_volume = np.asarray(payload["data"], dtype=float).T

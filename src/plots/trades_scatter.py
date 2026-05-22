@@ -10,6 +10,8 @@ from src.preprocess.catalog import PlotDatasetLocator
 
 from .errors import PreprocessedDataError
 from .settings import PlotRenderOptions
+from src.plotlib.errors import PayloadSchemaVersionError
+from src.plotlib.types import TradesPayloadV1, normalize_trades_payload_to_v1
 
 
 SIDE_LABELS = {-1.0: "buy taker", 1.0: "sell taker"}
@@ -21,7 +23,7 @@ def _trade_path(locator: PlotDatasetLocator):
     return locator.preprocessed_dir / f"{locator.base_id}-orderbook_for_plot.npz"
 
 
-def _load_trade_payload(locator: PlotDatasetLocator) -> pd.DataFrame:
+def _load_trade_payload(locator: PlotDatasetLocator) -> TradesPayloadV1:
     path = _trade_path(locator)
     if not path.is_file():
         raise FileNotFoundError(f"Trade dataset file does not exist: {path}")
@@ -48,10 +50,17 @@ def _load_trade_payload(locator: PlotDatasetLocator) -> pd.DataFrame:
     except (OSError, ValueError) as error:
         raise PreprocessedDataError(f"Failed to load trade dataset {path.name}: {error}") from error
 
-    trade_frame.attrs["product_id"] = locator.product_id
-    trade_frame.attrs["timestamp"] = locator.timestamp
-    trade_frame.attrs["time_step"] = locator.time_step
-    return trade_frame
+    return normalize_trades_payload_to_v1(
+        {
+            "product_id": locator.product_id,
+            "timestamp": locator.timestamp,
+            "time_step": locator.time_step,
+            "trade_time": trade_frame["Time"].to_numpy(),
+            "trade_price": trade_frame["Price"].to_numpy(),
+            "trade_volume": trade_frame["Volume"].to_numpy(),
+            "trade_side": trade_frame["Side"].to_numpy(),
+        }
+    )
 
 
 def _extract_trades(items: Sequence[PlotDatasetLocator | pd.DataFrame]) -> tuple[pd.DataFrame, str]:
@@ -60,7 +69,20 @@ def _extract_trades(items: Sequence[PlotDatasetLocator | pd.DataFrame]) -> tuple
 
     for item in items:
         if isinstance(item, PlotDatasetLocator):
-            trade_frame = _load_trade_payload(item)
+            trade_payload = _load_trade_payload(item)
+            if trade_payload.get("schema_version") != "1":
+                raise PayloadSchemaVersionError(
+                    "trades payload", "1", trade_payload.get("schema_version")
+                )
+            trade_frame = pd.DataFrame(
+                {
+                    "Time": pd.to_datetime(trade_payload["trade_time"]),
+                    "Price": np.asarray(trade_payload["trade_price"], dtype=float),
+                    "Volume": np.asarray(trade_payload["trade_volume"], dtype=float),
+                    "Side": np.asarray(trade_payload["trade_side"], dtype=float),
+                }
+            )
+            trade_frame.attrs["product_id"] = trade_payload["product_id"]
         elif isinstance(item, pd.DataFrame):
             required_columns = {"Time", "Price", "Volume", "Side"}
             missing_columns = required_columns - set(item.columns)

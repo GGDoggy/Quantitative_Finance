@@ -8,6 +8,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.plots.fill_probability import _simulation_path
+from src.plotlib.errors import PayloadSchemaVersionError
+from src.plotlib.types import normalize_simulation_arrays_to_v1
 from src.plots.settings import PlotRenderOptions, ProfitPlotSettings
 from src.plots.types import PlotDatasetLocator
 
@@ -58,7 +60,7 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
             ask_micro_profit.append(np.asarray(data["ask_micro_profit"], dtype=float))
             ask_result.append(np.asarray(data["ask_result"], dtype=int))
 
-    return {
+    return normalize_simulation_arrays_to_v1({
         "bid_near_size": (
             np.concatenate(bid_near_size) if bid_near_size else np.array([], dtype=float)
         ),
@@ -97,7 +99,7 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
         "ask_result": (
             np.concatenate(ask_result) if ask_result else np.array([], dtype=int)
         ),
-    }
+    })
 
 
 def _bin_edges(
@@ -286,6 +288,8 @@ def build_profit_view(
     )
     simulation_paths = [_simulation_path(locator) for locator in locators]
     arrays = load_simulation_arrays(simulation_paths)
+    if arrays.get("schema_version") != "1":
+        raise PayloadSchemaVersionError("simulation arrays", "1", arrays.get("schema_version"))
 
     bid_near_edges, bid_opp_edges, bid_profit, bid_sample_count = _grid_for_side(
         arrays,
