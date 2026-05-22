@@ -7,14 +7,23 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 import zipfile
-from typing import Iterable, MutableMapping
+from typing import Callable, Iterable, MutableMapping
 
 import numpy as np
 
 from src.plots.errors import PreprocessedDataError
 from src.plots.registry import PLOT_REGISTRY
+from src.preprocess.adapters.plot_registry_detector import PlotRegistryViewDetector
 from src.simulation.constants import DEFAULT_RESOLVED_TIME
 
+
+
+ViewDetector = Callable[[Iterable[str]], tuple[str, ...]]
+
+
+def _default_view_detector(data_keys: Iterable[str]) -> tuple[str, ...]:
+    detector = PlotRegistryViewDetector(PLOT_REGISTRY)
+    return detector(data_keys)
 
 SIMULATION_VIEW_KEYS = (
     "fill_probability",
@@ -329,6 +338,7 @@ def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
 def detect_available_views(
     path: Path,
     dataset_hint: PlotDatasetLocator | None = None,
+    view_detector: ViewDetector | None = None,
 ) -> tuple[str, ...]:
     try:
         with np.load(path, allow_pickle=False) as data:
@@ -336,11 +346,8 @@ def detect_available_views(
                 available_views = tuple(str(view) for view in data["available_views"].tolist())
             else:
                 data_keys = set(data.files)
-                available_views = tuple(
-                    key
-                    for key, spec in PLOT_REGISTRY.items()
-                    if set(spec.required_payload_keys).issubset(data_keys)
-                )
+                detector = view_detector or _default_view_detector
+                available_views = detector(data_keys)
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
 
@@ -368,16 +375,24 @@ def detect_available_views(
 
 
 def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
-    views: set[str] = set()
+    seen: set[str] = set()
+    encountered: list[str] = []
     for view_group in view_groups:
-        views.update(view_group)
+        for view in view_group:
+            if view in seen:
+                continue
+            seen.add(view)
+            encountered.append(view)
 
-    ordered_views = [view for view in PLOT_REGISTRY if view in views]
-    ordered_views.extend(sorted(views - set(ordered_views)))
+    ordered_views = [view for view in PLOT_REGISTRY if view in seen]
+    ordered_views.extend(view for view in encountered if view not in PLOT_REGISTRY)
     return tuple(ordered_views)
 
 
-def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedDataset]:
+def discover_preprocessed_datasets(
+    preprocessed_dir: Path,
+    view_detector: ViewDetector | None = None,
+) -> list[PreprocessedDataset]:
     entries: dict[
         tuple[str, str, float],
         dict[str, object],
@@ -427,7 +442,11 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
             )
 
             try:
-                available_views = detect_available_views(file_path, locator)
+                available_views = detect_available_views(
+                    file_path,
+                    locator,
+                    view_detector=view_detector,
+                )
             except PreprocessedDataError:
                 continue
 
