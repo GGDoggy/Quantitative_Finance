@@ -2,10 +2,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from pathlib import Path
 
-import numpy as np
-
 from .constants import DEFAULT_RESOLVED_TIME
-from .io import load_raw_dataset, parse_dataset_groups
+from .io import load_raw_dataset, parse_dataset_groups, save_result
 from .models import RawSimulationDataset, SimulationRequest, SimulationWorkerPayload
 from .runner import get_algorithm, get_algorithm_names, run_dataset_simulation
 
@@ -15,34 +13,6 @@ OUTPUT_PATH = Path("data/preprocessed")
 DEFAULT_TIME_STEP = 0.01
 DEFAULT_BASE_TICK = 0.00000001
 
-SIMULATION_RESULT_KEYS = (
-    "bid_prices",
-    "bid_near_size",
-    "bid_opp_size",
-    "bid_survival_time",
-    "bid_ahead",
-    "bid_behind",
-    "bid_vorder_ratio",
-    "bid_result",
-    "bid_spread",
-    "ask_prices",
-    "ask_near_size",
-    "ask_opp_size",
-    "ask_survival_time",
-    "ask_ahead",
-    "ask_behind",
-    "ask_vorder_ratio",
-    "ask_result",
-    "ask_spread",
-    "bid_mid_price",
-    "bid_micro_price",
-    "bid_mid_profit",
-    "bid_micro_profit",
-    "ask_mid_price",
-    "ask_micro_price",
-    "ask_mid_profit",
-    "ask_micro_profit",
-)
 
 
 def build_output_path(
@@ -96,19 +66,15 @@ def save_simulation_npz(
         algorithm_name,
         resolved_time,
     )
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    save_kwargs = {
-        "algorithm": algorithm_name,
-        "product_id": dataset.product_id,
-        "file_stem": dataset.file_stem,
-        "time_step": time_step,
-        "base_tick": base_tick,
-        "resolved_time": resolved_time,
-    }
-    save_kwargs.update(zip(SIMULATION_RESULT_KEYS, result))
-    np.savez_compressed(output_file, **save_kwargs)
-    return output_file
+    return save_result(
+        output_file,
+        algorithm_name=algorithm_name,
+        dataset=dataset,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+        result=result,
+    )
 
 
 def format_dataset_line(
