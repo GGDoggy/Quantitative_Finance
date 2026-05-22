@@ -33,18 +33,10 @@ Coinbase market-data collection, visualization, and simulation experiments.
 
 ## Simulation CLI
 
-Use an editable install so `src.simulation` is imported as a normal package (no `sys.path` hacks):
-
-```bash
-pip install -e .
-```
-
-Run the interactive simulation CLI via module or console script:
+Run the interactive simulation helper as a repo-internal module:
 
 ```bash
 python -m src.simulation
-# or
-qf-simulation
 ```
 
 Legacy wrapper is still available:

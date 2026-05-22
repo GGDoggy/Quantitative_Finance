@@ -18,8 +18,7 @@ from typing import Any
 
 from .constants import DEFAULT_RESOLVED_TIME
 from .io import load_raw_dataset as _load_raw_dataset, parse_dataset_groups as _parse_dataset_groups
-from .models import RawSimulationDataset, SimulationRequest
-from .runner import run_dataset_simulation as _run_dataset_simulation
+from .models import RawSimulationDataset
 from .library import (
     build_output_path as _build_output_path,
     format_dataset_line as _format_dataset_line,
@@ -27,8 +26,9 @@ from .library import (
     get_algorithm_names as _get_algorithm_names,
     is_processed as _is_processed,
     parse_selection as _parse_selection,
-    process_dataset_job as _process_dataset_job,
-    run_datasets_in_parallel as _run_datasets_in_parallel,
+    process_dataset_job_compat as _process_dataset_job,
+    run_dataset_simulation as _run_dataset_simulation,
+    run_datasets_in_parallel_compat as _run_datasets_in_parallel,
     save_simulation_npz as _save_simulation_npz,
 )
 
@@ -75,9 +75,13 @@ def load_dataset(dataset):
 
 def run_dataset_simulation(dataset, algorithm_name, time_step, base_tick, resolved_time=DEFAULT_RESOLVED_TIME):
     _warn("run_dataset_simulation")
-    typed = _to_dataset(dataset)
-    req = SimulationRequest(typed, algorithm_name, time_step, base_tick, resolved_time)
-    return _run_dataset_simulation(req, _load_raw_dataset(typed))
+    return _run_dataset_simulation(
+        _to_dataset(dataset),
+        algorithm_name,
+        time_step,
+        base_tick,
+        resolved_time,
+    )
 
 
 def save_simulation_npz(dataset, output_path, algorithm_name, time_step, base_tick, result, resolved_time=DEFAULT_RESOLVED_TIME):

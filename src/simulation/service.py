@@ -1,26 +1,26 @@
 """UI-friendly helpers for running fill-probability simulations from raw batches."""
 from __future__ import annotations
 
-from pathlib import Path
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from .constants import DEFAULT_RESOLVED_TIME
-from .models import LoadedMarketData, RawSimulationDataset, SimulationJobResult, SimulationRequest, SimulationResult
-from .library import (
-    DEFAULT_BASE_TICK,
-    build_output_path,
-    get_algorithm,
-    get_algorithm_names,
-    run_datasets_in_parallel,
-    save_simulation_npz,
+from .io import build_output_path, load_raw_dataset, save_result_file
+from .models import (
+    LoadedMarketData,
+    RawSimulationDataset,
+    SimulationJobResult,
+    SimulationRequest,
+    SimulationResult,
 )
-from .io import load_raw_dataset
-from .runner import run_dataset_simulation
+from .registry import get_algorithm, list_algorithms as list_registered_algorithms
+from .runner import run_datasets_in_parallel, run_simulation_request
 
 if TYPE_CHECKING:
     from src.preprocess.catalog import RawBatch
 
+DEFAULT_BASE_TICK = 0.00000001
 
 
 def _validate_parameters(
@@ -57,7 +57,7 @@ def _saved_action_message(simulation_result: SimulationJobResult) -> str:
 
 def list_algorithms() -> list[str]:
     """Return the registered simulation algorithm names."""
-    return get_algorithm_names()
+    return list_registered_algorithms()
 
 
 def simulate_loaded_data(
@@ -70,17 +70,13 @@ def simulate_loaded_data(
 ) -> SimulationResult:
     """Simulate from pre-loaded market arrays without re-reading CSV files."""
     _validate_parameters(algorithm_name, time_step, resolved_time)
-    algorithm = get_algorithm(algorithm_name)
-    init, updates, trades, start_time = loaded_data
-    return algorithm(
-        init,
-        updates,
-        trades,
-        start_time,
+    request = SimulationRequest(
+        algorithm_name=algorithm_name,
         time_step=time_step,
         base_tick=base_tick,
         resolved_time=resolved_time,
     )
+    return run_simulation_request(request, loaded_data)
 
 
 def save_result(
@@ -95,14 +91,22 @@ def save_result(
 ) -> Path:
     """Save one simulation result to npz using standard naming convention."""
     _validate_parameters(algorithm_name, time_step, resolved_time)
-    return save_simulation_npz(
-        dataset,
+    output_file = build_output_path(
         output_dir,
-        algorithm_name,
+        dataset.product_id,
+        dataset.timestamp,
         time_step,
-        base_tick,
-        result,
+        algorithm_name,
         resolved_time,
+    )
+    return save_result_file(
+        output_file,
+        algorithm_name=algorithm_name,
+        dataset=dataset,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+        result=result,
     )
 
 
@@ -126,22 +130,22 @@ def simulate_batch(
         resolved_time,
     )
     overwritten = output_path.exists()
-    request = SimulationRequest(
-        dataset=dataset,
+    loaded_data = load_raw_dataset(dataset)
+    result = simulate_loaded_data(
+        loaded_data,
         algorithm_name=algorithm_name,
         time_step=time_step,
         base_tick=base_tick,
         resolved_time=resolved_time,
     )
-    result = run_dataset_simulation(request, load_raw_dataset(dataset))
-    saved_path = save_simulation_npz(
+    saved_path = save_result(
         dataset,
-        output_dir,
-        algorithm_name,
-        time_step,
-        base_tick,
-        result,
-        resolved_time,
+        output_dir=output_dir,
+        algorithm_name=algorithm_name,
+        time_step=time_step,
+        result=result,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
     )
     return SimulationJobResult(
         raw_batch=raw_batch,
@@ -193,13 +197,16 @@ def simulate_batches(
         for index, raw_batch in enumerate(raw_batches)
     }
     datasets = [_to_simulation_dataset(raw_batch) for raw_batch in raw_batches]
+    request = SimulationRequest(
+        algorithm_name=algorithm_name,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+    )
     job_results = run_datasets_in_parallel(
         datasets,
         output_dir,
-        algorithm_name,
-        time_step,
-        base_tick,
-        resolved_time,
+        request,
     )
     results = [
         SimulationJobResult(

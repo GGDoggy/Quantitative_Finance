@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from ._simulation_core import file_time_to_unix, read_csv
+from .constants import DEFAULT_RESOLVED_TIME
 from .models import LoadedMarketData, RawSimulationDataset, SimulationResult
 
 SIMULATION_RESULT_KEYS = (
@@ -45,6 +46,21 @@ SIMULATION_METADATA_KEYS = (
     "base_tick",
     "resolved_time",
 )
+
+
+def build_output_path(
+    output_path: Path | str,
+    product_id: str,
+    timestamp: str,
+    time_step: float,
+    algorithm_name: str,
+    resolved_time: float = DEFAULT_RESOLVED_TIME,
+) -> Path:
+    filename = (
+        f"{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}"
+        f"-simulation-{algorithm_name}.npz"
+    )
+    return Path(output_path) / filename
 
 
 def parse_dataset_groups(data_v3_path: Path | str) -> list[RawSimulationDataset]:
@@ -94,14 +110,19 @@ def load_raw_dataset(dataset: RawSimulationDataset) -> LoadedMarketData:
     updates = read_csv(dataset.updates)
     trades = read_csv(dataset.trade)
     start_time = file_time_to_unix(dataset.timestamp)
-    return init, updates, trades, start_time
+    return LoadedMarketData(
+        init=init,
+        updates=updates,
+        trades=trades,
+        start_time=start_time,
+    )
 
 
 def serialize_result_for_npz(result: SimulationResult) -> dict[str, Any]:
-    return dict(zip(SIMULATION_RESULT_KEYS, result))
+    return dict(zip(SIMULATION_RESULT_KEYS, result.as_tuple()))
 
 
-def save_result(
+def save_result_file(
     output_file: Path,
     *,
     algorithm_name: str,

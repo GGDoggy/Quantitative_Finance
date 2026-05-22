@@ -1,4 +1,12 @@
+import numpy as np
+
 from src.simulation.io import SIMULATION_METADATA_KEYS, SIMULATION_RESULT_KEYS, serialize_result_for_npz
+from src.simulation.models import SimulationResult
+
+
+def _build_result() -> SimulationResult:
+    arrays = tuple(np.array([index], dtype=float) for index in range(len(SIMULATION_RESULT_KEYS)))
+    return SimulationResult.from_algorithm_output(arrays)
 
 
 def test_simulation_result_keys_snapshot() -> None:
@@ -44,5 +52,5 @@ def test_simulation_metadata_keys_snapshot() -> None:
 
 
 def test_serialize_result_for_npz_uses_only_result_keys() -> None:
-    payload = serialize_result_for_npz(tuple(range(len(SIMULATION_RESULT_KEYS))))
+    payload = serialize_result_for_npz(_build_result())
     assert tuple(payload.keys()) == SIMULATION_RESULT_KEYS

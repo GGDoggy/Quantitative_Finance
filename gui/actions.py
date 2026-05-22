@@ -7,9 +7,9 @@ import inspect
 from src.plots import PLOT_REGISTRY
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
-    get_algorithm,
     simulate_batches,
 )
+from src.simulation.registry import get_algorithm
 
 from .styles import COST_FILTERED_PLOT_TYPES, PLOT_PLACEHOLDER, SIMULATION_HEATMAP_PLOT_TYPES, TIMESTAMP_PLACEHOLDER, FILL_GROUP_PLACEHOLDER
 

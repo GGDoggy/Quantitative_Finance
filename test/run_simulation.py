@@ -1,8 +1,7 @@
-"""Deprecated entrypoint.
+"""Thin wrapper around the interactive simulation module entrypoint."""
 
-Use `python -m src.simulation` (or `qf-simulation` after `pip install -e .`).
-"""
+from src.simulation.__main__ import main
 
-raise SystemExit(
-    "Deprecated: run `python -m src.simulation` or `qf-simulation` after `pip install -e .`."
-)
+
+if __name__ == "__main__":
+    main()

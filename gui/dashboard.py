@@ -10,7 +10,7 @@ from src.preprocess import PreprocessedDataset, RawBatch
 from src.simulation import (
     DEFAULT_RESOLVED_TIME,
     DEFAULT_TIME_STEP as DEFAULT_SIMULATION_TIME_STEP,
-    get_algorithm_names,
+    list_algorithms,
 )
 
 from .actions import DashboardActionsMixin
@@ -95,7 +95,7 @@ class OrderbookDashboard(
             button_type="light",
             sizing_mode="stretch_width",
         )
-        algorithm_names = get_algorithm_names()
+        algorithm_names = list_algorithms()
         self.simulation_algorithm_select = pn.widgets.Select(
             name="Simulation algorithm",
             options=algorithm_names,

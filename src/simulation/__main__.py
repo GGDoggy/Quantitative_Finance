@@ -1,28 +1,16 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
 from .constants import DEFAULT_RESOLVED_TIME
-from .io import load_raw_dataset, parse_dataset_groups
+from .io import build_output_path, load_raw_dataset, parse_dataset_groups
 from .library import (
     DATA_V3_PATH,
     DEFAULT_BASE_TICK,
     DEFAULT_TIME_STEP,
     OUTPUT_PATH,
-    get_default_worker_count,
-    process_dataset_job,
 )
 from .service import list_algorithms, save_result, simulate_loaded_data
 
 
-def _build_output_path(output_path, product_id, timestamp, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
-    filename = (
-        f"{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}"
-        f"-simulation-{algorithm_name}.npz"
-    )
-    return output_path / filename
-
-
 def _is_processed(dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
-    return _build_output_path(
+    return build_output_path(
         output_path,
         dataset.product_id,
         dataset.timestamp,
@@ -33,7 +21,7 @@ def _is_processed(dataset, output_path, time_step, algorithm_name, resolved_time
 
 
 def _format_dataset_line(index, dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
-    output_file = _build_output_path(
+    output_file = build_output_path(
         output_path,
         dataset.product_id,
         dataset.timestamp,
@@ -136,40 +124,10 @@ def main(
         return
 
     selected = prompt_dataset_selection(pending, output_path, time_step, algorithm_name)
-    if len(selected) == 1:
-        dataset = selected[0]
+    for dataset in selected:
         print(f"Processing {dataset.file_stem} with {algorithm_name}...")
         output_file = _process_dataset(dataset, output_path, algorithm_name, time_step, base_tick)
         print(f"Saved {output_file}")
-        return
-
-    print(f"Processing {len(selected)} datasets with {algorithm_name}...")
-    failures = []
-    worker_count = get_default_worker_count(len(selected))
-    with ProcessPoolExecutor(max_workers=worker_count) as executor:
-        future_to_dataset = {
-            executor.submit(
-                process_dataset_job,
-                dataset,
-                output_path,
-                algorithm_name,
-                time_step,
-                base_tick,
-            ): dataset
-            for dataset in selected
-        }
-        for future in as_completed(future_to_dataset):
-            dataset = future_to_dataset[future]
-            try:
-                job_result = future.result()
-                print(f"Saved {job_result.output_file}")
-            except Exception as exc:
-                failures.append((dataset.file_stem, exc))
-                print(f"Failed {dataset.file_stem}: {exc}")
-
-    if failures:
-        failed_stems = ", ".join(file_stem for file_stem, _exc in failures)
-        print(f"Completed with failures: {failed_stems}")
 
 
 if __name__ == "__main__":
