@@ -1,4 +1,4 @@
-"""Public API for preprocess discovery, models, and batch preprocessing."""
+"""Public API for preprocess orchestration and payload validation."""
 from .exceptions import (
     PreprocessError,
     PreprocessOutputConflictError,
@@ -17,6 +17,7 @@ from .datasets import (
     parse_timestamp,
 )
 from .models import PlotDatasetLocator, PreprocessContext, PreprocessedDataset, RawBatch
+from .registry import PLOT_REGISTRY, PreprocessBuilderSpec
 from .service import DEFAULT_TIME_STEP, preprocess_batch, preprocess_batches
 
 
@@ -25,6 +26,8 @@ __all__ = [
     "PreprocessedDataset",
     "PlotDatasetLocator",
     "PreprocessContext",
+    "PreprocessBuilderSpec",
+    "PLOT_REGISTRY",
     "discover_raw_batches",
     "discover_preprocessed_datasets",
     "find_simulation_files",

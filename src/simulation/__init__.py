@@ -2,13 +2,13 @@
 from .io import load_raw_dataset
 from .models import (
     LoadedMarketData,
-    RawSimulationDataset,
     SimulationJobResult,
     SimulationRequest,
     SimulationResult,
 )
 from .registry import list_algorithms
 from .runner import simulate_batch, simulate_batches, simulate_loaded_data
+from src.raw_batches import RawBatch
 
 __all__ = [
     "list_algorithms",
@@ -17,7 +17,7 @@ __all__ = [
     "simulate_batch",
     "simulate_batches",
     "LoadedMarketData",
-    "RawSimulationDataset",
+    "RawBatch",
     "SimulationJobResult",
     "SimulationRequest",
     "SimulationResult",

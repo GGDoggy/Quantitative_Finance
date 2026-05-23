@@ -1,124 +1,50 @@
-# Preprocess Documentation
+# `src.preprocess`
 
-`src/preprocess/` is the non-UI layer that turns a raw `v3` CSV batch into a dashboard-ready `.npz` dataset, and also provides catalog/discovery helpers for both preprocessed orderbook files and simulation outputs.
+`src.preprocess` 只負責把一個 `RawBatch` 轉成 dashboard 可讀取的 preprocessed `.npz`。
 
-This directory documents the current implementation in the repo as of the refactored `gui/` dashboard. It does not describe the older `gui/plot.py` or `src/preprocess/catalog.py` layout that may still appear in older notes.
+它不再負責：
 
-## Scope
+- 原始 CSV 批次 discovery
+- simulation artifact discovery
+- `.npz` 命名規則定義
 
-The package currently has four responsibilities:
+這些職責已移到：
 
-1. Discover raw CSV batches and preprocessed `.npz` datasets.
-2. Parse and normalize preprocess and simulation filename conventions.
-3. Build in-memory preprocess payloads from raw CSV files.
-4. Write merged preprocess results back to `data/preprocessed/` in a format the dashboard can load.
+- `src.raw_batches`
+- `src.dataset_artifacts`
 
-## Current module map
+## Current responsibilities
 
-- `src/preprocess/__init__.py`
-  - Stable public API surface.
-- `src/preprocess/models.py`
-  - Dataclasses used across discovery, rendering, and preprocessing.
-- `src/preprocess/datasets.py`
-  - Filename parsing, dataset discovery, simulation matching, and `.npz` loading/validation.
-- `src/preprocess/service.py`
-  - Preprocess orchestration, CSV loading, builder execution, payload merge, and output writing.
-- `src/preprocess/orderbook.py`
-  - Orderbook-specific payload builder.
-- `src/preprocess/exceptions.py`
-  - Package-specific exception hierarchy.
+- 建立 `PreprocessContext`
+- 執行 preprocess builders
+- 合併 payload chunk
+- 寫出 preprocessed artifact
+- 驗證並載入 preprocessed payload
 
-## End-to-end flow
+## Main APIs
 
-```mermaid
-flowchart LR
-    A["Raw v3 CSV batch<br/>level2-init / level2-updates / trade"] --> B["discover_raw_batches()"]
-    B --> C["preprocess_batch() / preprocess_batches()"]
-    C --> D["build_preprocess_context()"]
-    D --> E["PLOT_REGISTRY preprocess builders"]
-    E --> F["Merged payload"]
-    F --> G["*-orderbook_for_plot.npz"]
-    G --> H["discover_preprocessed_datasets()"]
-    H --> I["Dashboard selectors and renderers"]
-    J["*-simulation-*.npz"] --> H
-```
+- `preprocess_batch(batch, output_dir, time_step=...)`
+- `preprocess_batches(batches, output_dir, time_step=...)`
+- `load_preprocessed_payload(dataset)`
 
-## Where it is used
+## Internal structure
 
-- `gui/catalog.py`
-  - Uses discovery helpers to build product, timestamp, and simulation-group selectors.
-- `gui/actions.py`
-  - Uses `preprocess_batches()` when the user clicks preprocess in the dashboard.
-- `gui/rendering.py`
-  - Converts `PreprocessedDataset` to `PlotDatasetLocator` before plot rendering.
-- `src/plots/*`
-  - Read orderbook/trade payloads or match simulation files during rendering.
-
-## Main concepts
-
-### Raw batch
-
-A raw batch is a complete triple of:
-
-- `level2-<product>-init-<timestamp>.csv`
-- `level2-<product>-updates-<timestamp>.csv`
-- `trade-<product>-<timestamp>.csv`
-
-These three files are grouped into one `RawBatch`.
-
-### Preprocessed dataset
-
-A preprocessed dataset is an orderbook-oriented `.npz` file:
-
-- `<product>-<timestamp>-<time_step>-orderbook_for_plot.npz`
-
-It may also be associated with zero or more simulation files:
-
-- `<product>-<timestamp>-<time_step>-simulation-<algorithm>.npz`
-- `<product>-<timestamp>-<time_step>-resolved-<resolved_time>-simulation-<algorithm>.npz`
-
-The dashboard treats simulation-backed datasets as `PreprocessedDataset` entries too, with `simulation_path` populated.
-
-## Public API summary
-
-Import stable names from `src.preprocess`:
-
-- Models
-  - `RawBatch`
-  - `PreprocessedDataset`
-  - `PlotDatasetLocator`
+- `service.py`
+  - preprocess orchestration
+- `builders/`
+  - orderbook 與 trades payload builders
+- `registry.py`
+  - preprocess builder registry
+- `datasets.py`
+  - artifact discovery compatibility wrapper + payload loading
+- `models.py`
   - `PreprocessContext`
-- Discovery and filename helpers
-  - `discover_raw_batches()`
-  - `discover_preprocessed_datasets()`
-  - `find_simulation_files()`
-  - `has_simulation_file()`
-  - `format_time_step()`
-  - `parse_timestamp()`
-  - `load_preprocessed_payload()`
-- Services
-  - `DEFAULT_TIME_STEP`
-  - `preprocess_batch()`
-  - `preprocess_batches()`
-- Exceptions
-  - `PreprocessError`
-  - `PreprocessValidationError`
-  - `PreprocessOutputConflictError`
-  - `PreprocessedDataError`
-  - `PreprocessedDataFileError`
-  - `PreprocessedDataSchemaError`
 
-## Notes and constraints
+## Upstream / downstream
 
-- `preprocess_batch()` does not hardcode plot types. It pulls preprocess builders from `src.plots.registry.PLOT_REGISTRY`.
-- The current package only writes one `.npz` file per raw batch/time step. Multiple plot types share that file through merged payload keys.
-- Simulation data is not produced by `src/preprocess/`; it is only discovered and attached to datasets by filename matching.
-- `discover_raw_batches()` marks a raw batch as already preprocessed if any matching orderbook `.npz` exists for the same `(product_id, timestamp)`.
-- `load_preprocessed_payload()` validates the orderbook schema before returning payload data.
+Flow:
 
-## Documents in this folder
-
-- `module-reference.md`
-  - Module-by-module behavior and public API details.
-- `formats-and-contracts.md`
-  - Filename rules, `.npz` schema, and builder contracts.
+1. `src.raw_batches.discover_raw_batches()` 找到完整 raw batch
+2. `src.preprocess.preprocess_batch()` 產生 preprocessed `.npz`
+3. `src.dataset_artifacts.discover_preprocessed_artifacts()` 建立 artifact catalog
+4. `src.plotlib.loaders.*` 讀取 artifact 並 render

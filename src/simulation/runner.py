@@ -4,10 +4,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from pathlib import Path
 
+from src.raw_batches import RawBatch
+
 from .io import build_output_path, load_raw_dataset, save_result_file
 from .models import (
     LoadedMarketData,
-    RawSimulationDataset,
     SimulationJobResult,
     SimulationRequest,
     SimulationResult,
@@ -36,7 +37,7 @@ def _run_simulation(
 
 def _save_result(
     result: SimulationResult,
-    dataset: RawSimulationDataset,
+    dataset: RawBatch,
     request: SimulationRequest,
     output_dir: Path | str,
 ) -> Path:
@@ -67,7 +68,7 @@ def simulate_loaded_data(
 
 
 def simulate_batch(
-    dataset: RawSimulationDataset,
+    dataset: RawBatch,
     request: SimulationRequest,
     output_dir: Path | str,
 ) -> SimulationJobResult:
@@ -96,7 +97,7 @@ def get_default_worker_count(task_count: int) -> int:
 
 
 def _process_dataset_job(
-    dataset: RawSimulationDataset,
+    dataset: RawBatch,
     output_path: Path | str,
     request: SimulationRequest,
 ) -> SimulationWorkerPayload:
@@ -120,7 +121,7 @@ def _process_dataset_job(
 
 
 def _run_datasets_in_parallel(
-    selected: list[RawSimulationDataset],
+    selected: list[RawBatch],
     output_path: Path | str,
     request: SimulationRequest,
 ) -> list[SimulationWorkerPayload]:
@@ -147,7 +148,7 @@ def _run_datasets_in_parallel(
 
 
 def simulate_batches(
-    datasets: list[RawSimulationDataset],
+    datasets: list[RawBatch],
     request: SimulationRequest,
     output_dir: Path | str,
 ) -> list[SimulationJobResult]:

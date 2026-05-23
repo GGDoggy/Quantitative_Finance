@@ -5,9 +5,10 @@ from typing import Any
 
 import numpy as np
 
-from ._simulation_core import file_time_to_unix, read_csv
-from .constants import DEFAULT_RESOLVED_TIME
-from .models import LoadedMarketData, RawSimulationDataset, SimulationResult
+from src.dataset_artifacts import build_simulation_output_path
+from src.raw_batches import LoadedRawBatch, RawBatch, discover_raw_batches, load_raw_batch
+
+from .models import LoadedMarketData, SimulationResult
 
 SIMULATION_RESULT_KEYS = (
     "bid_prices",
@@ -54,67 +55,29 @@ def build_output_path(
     timestamp: str,
     time_step: float,
     algorithm_name: str,
-    resolved_time: float = DEFAULT_RESOLVED_TIME,
+    resolved_time: float,
 ) -> Path:
-    filename = (
-        f"{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}"
-        f"-simulation-{algorithm_name}.npz"
+    return build_simulation_output_path(
+        output_path,
+        product_id,
+        timestamp,
+        time_step,
+        algorithm_name,
+        resolved_time,
     )
-    return Path(output_path) / filename
 
 
-def parse_dataset_groups(data_v3_path: Path | str) -> list[RawSimulationDataset]:
-    grouped: dict[tuple[str, str], dict[str, Path | None]] = {}
-    for path in sorted(Path(data_v3_path).glob("*.csv")):
-        stem_parts = path.stem.split("-")
-        if len(stem_parts) < 4:
-            continue
-
-        if stem_parts[0] == "level2" and stem_parts[-2] in {"init", "updates"}:
-            data_type = stem_parts[-2]
-            timestamp = stem_parts[-1]
-            product_id = "-".join(stem_parts[1:-2])
-        elif stem_parts[0] == "trade":
-            data_type = "trade"
-            timestamp = stem_parts[-1]
-            product_id = "-".join(stem_parts[1:-1])
-        else:
-            continue
-
-        key = (product_id, timestamp)
-        if key not in grouped:
-            grouped[key] = {"init": None, "updates": None, "trade": None}
-        grouped[key][data_type] = path
-
-    available: list[RawSimulationDataset] = []
-    for (product_id, timestamp), parts in grouped.items():
-        init, updates, trade = parts["init"], parts["updates"], parts["trade"]
-        if init is None or updates is None or trade is None:
-            continue
-        available.append(
-            RawSimulationDataset(
-                product_id=product_id,
-                timestamp=timestamp,
-                file_stem=f"{product_id}-{timestamp}",
-                init_path=init,
-                updates_path=updates,
-                trade_path=trade,
-            )
-        )
-
-    return sorted(available, key=lambda item: (item.product_id, item.timestamp))
+def parse_dataset_groups(data_v3_path: Path | str) -> list[RawBatch]:
+    return discover_raw_batches(data_v3_path)
 
 
-def load_raw_dataset(dataset: RawSimulationDataset) -> LoadedMarketData:
-    init = read_csv(dataset.init_path)
-    updates = read_csv(dataset.updates_path)
-    trades = read_csv(dataset.trade_path)
-    start_time = file_time_to_unix(dataset.timestamp)
+def load_raw_dataset(dataset: RawBatch) -> LoadedMarketData:
+    loaded_batch: LoadedRawBatch = load_raw_batch(dataset)
     return LoadedMarketData(
-        init=init,
-        updates=updates,
-        trades=trades,
-        start_time=start_time,
+        init=loaded_batch.init,
+        updates=loaded_batch.updates,
+        trades=loaded_batch.trades,
+        start_time=loaded_batch.start_time,
     )
 
 
@@ -126,7 +89,7 @@ def save_result_file(
     output_file: Path,
     *,
     algorithm_name: str,
-    dataset: RawSimulationDataset,
+    dataset: RawBatch,
     time_step: float,
     base_tick: float,
     resolved_time: float,

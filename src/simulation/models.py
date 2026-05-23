@@ -7,17 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-
-@dataclass(frozen=True)
-class RawSimulationDataset:
-    """Structured raw CSV paths required to run one simulation dataset."""
-
-    product_id: str
-    timestamp: str
-    file_stem: str
-    init_path: Path
-    updates_path: Path
-    trade_path: Path
+from src.raw_batches import RawBatch
 
 
 @dataclass(frozen=True)
@@ -112,7 +102,7 @@ class SimulationRequest:
 
 @dataclass(frozen=True)
 class SimulationJobResult:
-    dataset: RawSimulationDataset
+    dataset: RawBatch
     output_path: Path
     overwritten: bool
 
@@ -123,7 +113,7 @@ class SimulationWorkerPayload:
     output_file: str
     overwritten: bool
 
-    def to_job_result(self, dataset: RawSimulationDataset) -> SimulationJobResult:
+    def to_job_result(self, dataset: RawBatch) -> SimulationJobResult:
         return SimulationJobResult(
             dataset=dataset,
             output_path=Path(self.output_file),
