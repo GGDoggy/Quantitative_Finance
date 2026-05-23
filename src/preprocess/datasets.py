@@ -1,21 +1,49 @@
-"""Catalog raw Coinbase CSV batches and preprocessed plot datasets."""
+"""Dataset discovery, filename parsing, and NPZ payload loading for preprocess."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
+from typing import Match
 import zipfile
-from typing import Iterable, MutableMapping
 
 import numpy as np
 
-from src.plots.errors import PreprocessedDataError
-from src.plots.registry import PLOT_REGISTRY
-from src.simulation.constants import DEFAULT_RESOLVED_TIME
+from .exceptions import (
+    PreprocessValidationError,
+    PreprocessedDataError,
+    PreprocessedDataFileError,
+    PreprocessedDataSchemaError,
+)
+from .models import PlotDatasetLocator, PreprocessedDataset, RawBatch
 
 
+DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
+TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+DEFAULT_VIEW_ORDER = (
+    "orderbook",
+    "trades_scatter",
+    "trade_volume_timeline",
+    "fill_probability",
+    "mid_profit",
+    "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+)
+DEFAULT_VIEW_SPECS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("orderbook", frozenset(("price_axis", "time_axis", "data", "bid", "ask"))),
+    (
+        "trades_scatter",
+        frozenset(("trade_time", "trade_price", "trade_volume", "trade_side")),
+    ),
+    (
+        "trade_volume_timeline",
+        frozenset(("trade_time", "trade_price", "trade_volume", "trade_side")),
+    ),
+)
 SIMULATION_VIEW_KEYS = (
     "fill_probability",
     "mid_profit",
@@ -24,25 +52,27 @@ SIMULATION_VIEW_KEYS = (
     "micro_fill_probability_cost",
 )
 
-
-RAW_LEVEL2_INIT_RE = re.compile(
+_RAW_LEVEL2_INIT_RE = re.compile(
     r"^level2-(?P<product_id>.+)-init-(?P<timestamp>\d{8}\.\d{6})\.csv$"
 )
-RAW_LEVEL2_UPDATES_RE = re.compile(
+_RAW_LEVEL2_UPDATES_RE = re.compile(
     r"^level2-(?P<product_id>.+)-updates-(?P<timestamp>\d{8}\.\d{6})\.csv$"
 )
-RAW_TRADE_RE = re.compile(r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})\.csv$")
-TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
-PREPROCESSED_RE = re.compile(
+_RAW_TRADE_RE = re.compile(
+    r"^trade-(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})\.csv$"
+)
+_PREPROCESSED_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
     rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})-orderbook_for_plot\.npz$"
 )
-SIMULATION_RE = re.compile(
+_SIMULATION_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
     rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})"
     rf"(?:-resolved-(?P<resolved_time>{TIME_STEP_RE_FRAGMENT}))?"
     r"-simulation-(?P<algorithm>.+)\.npz$"
 )
+
+ViewSpecs = Sequence[tuple[str, Iterable[str]]]
 
 
 @dataclass(frozen=True)
@@ -61,15 +91,66 @@ def format_time_step(time_step: float | str | Decimal) -> str:
     try:
         decimal_value = Decimal(str(time_step))
     except InvalidOperation as error:
-        raise ValueError(f"Invalid time step: {time_step!r}") from error
+        raise PreprocessValidationError(f"Invalid time step: {time_step!r}") from error
 
     if not decimal_value.is_finite() or decimal_value <= 0:
-        raise ValueError(f"Time step must be a positive finite value: {time_step!r}")
+        raise PreprocessValidationError(
+            f"Time step must be a positive finite value: {time_step!r}"
+        )
 
     normalized = decimal_value.normalize()
     if normalized == normalized.to_integral():
         return format(normalized, "f")
     return format(normalized, "f").rstrip("0").rstrip(".")
+
+
+def parse_timestamp(timestamp: str) -> datetime:
+    return datetime.strptime(timestamp, "%Y%m%d.%H%M%S")
+
+
+def match_raw_level2_init_filename(filename: str) -> Match[str] | None:
+    return _RAW_LEVEL2_INIT_RE.match(filename)
+
+
+def match_raw_level2_updates_filename(filename: str) -> Match[str] | None:
+    return _RAW_LEVEL2_UPDATES_RE.match(filename)
+
+
+def match_raw_trade_filename(filename: str) -> Match[str] | None:
+    return _RAW_TRADE_RE.match(filename)
+
+
+def match_preprocessed_filename(filename: str) -> Match[str] | None:
+    return _PREPROCESSED_RE.match(filename)
+
+
+def match_simulation_filename(filename: str) -> Match[str] | None:
+    return _SIMULATION_RE.match(filename)
+
+
+def is_preprocessed_filename(filename: str) -> bool:
+    return match_preprocessed_filename(filename) is not None
+
+
+def is_simulation_filename(filename: str) -> bool:
+    return match_simulation_filename(filename) is not None
+
+
+def parse_simulation_filename(filename: str) -> SimulationFileMetadata | None:
+    match = match_simulation_filename(filename)
+    if not match:
+        return None
+
+    resolved_time_token = match.group("resolved_time")
+    return SimulationFileMetadata(
+        product_id=match.group("product_id"),
+        timestamp=match.group("timestamp"),
+        time_step=float(match.group("time_step")),
+        time_step_token=match.group("time_step"),
+        resolved_time=float(resolved_time_token) if resolved_time_token is not None else None,
+        resolved_time_token=resolved_time_token,
+        algorithm_name=match.group("algorithm"),
+    )
 
 
 def _simulation_time_step_tokens(
@@ -93,10 +174,12 @@ def _simulation_value_tokens(
     try:
         decimal_value = Decimal(str(value))
     except InvalidOperation as error:
-        raise ValueError(f"Invalid resolved time: {value!r}") from error
+        raise PreprocessValidationError(f"Invalid resolved time: {value!r}") from error
 
     if not decimal_value.is_finite() or decimal_value < 0:
-        raise ValueError(f"Resolved time must be a non-negative finite value: {value!r}")
+        raise PreprocessValidationError(
+            f"Resolved time must be a non-negative finite value: {value!r}"
+        )
 
     normalized_value = decimal_value.normalize()
     if normalized_value == normalized_value.to_integral():
@@ -116,12 +199,13 @@ def _matches_resolved_time(
     metadata_resolved_time_token: str | None,
     resolved_time: float | None,
     resolved_time_tokens: set[str],
+    resolved_time_fallback: float = DEFAULT_RESOLVED_TIME_FALLBACK,
 ) -> bool:
     if resolved_time is None:
         return True
 
     if metadata_resolved_time is None:
-        return resolved_time == DEFAULT_RESOLVED_TIME
+        return resolved_time == resolved_time_fallback
 
     return (
         metadata_resolved_time_token in resolved_time_tokens
@@ -129,21 +213,59 @@ def _matches_resolved_time(
     )
 
 
-def parse_simulation_filename(filename: str) -> SimulationFileMetadata | None:
-    match = SIMULATION_RE.match(filename)
-    if not match:
-        return None
-
-    resolved_time_token = match.group("resolved_time")
-    return SimulationFileMetadata(
-        product_id=match.group("product_id"),
-        timestamp=match.group("timestamp"),
-        time_step=float(match.group("time_step")),
-        time_step_token=match.group("time_step"),
-        resolved_time=float(resolved_time_token) if resolved_time_token is not None else None,
-        resolved_time_token=resolved_time_token,
-        algorithm_name=match.group("algorithm"),
+def iter_files(path: Path, suffix: str) -> Iterable[Path]:
+    if not path.exists():
+        return []
+    return sorted(
+        entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix
     )
+
+
+def _normalized_view_specs(
+    view_specs: ViewSpecs | None,
+) -> tuple[tuple[str, frozenset[str]], ...]:
+    if view_specs is None:
+        return DEFAULT_VIEW_SPECS
+    return tuple((view_key, frozenset(required_keys)) for view_key, required_keys in view_specs)
+
+
+def detect_available_views(
+    path: Path,
+    view_specs: ViewSpecs | None = None,
+) -> tuple[str, ...]:
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            if "available_views" in data.files:
+                available_views = tuple(str(view) for view in data["available_views"].tolist())
+            else:
+                data_keys = set(data.files)
+                available_views = tuple(
+                    view_key
+                    for view_key, required_keys in _normalized_view_specs(view_specs)
+                    if required_keys.issubset(data_keys)
+                )
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise PreprocessedDataFileError(f"Failed to inspect {path.name}: {error}") from error
+
+    return available_views or ("orderbook",)
+
+
+def _union_available_views(
+    *view_groups: Iterable[str],
+    preferred_order: Sequence[str] = DEFAULT_VIEW_ORDER,
+) -> tuple[str, ...]:
+    seen: set[str] = set()
+    encountered: list[str] = []
+    for view_group in view_groups:
+        for view in view_group:
+            if view in seen:
+                continue
+            seen.add(view)
+            encountered.append(view)
+
+    ordered_views = [view for view in preferred_order if view in seen]
+    ordered_views.extend(view for view in encountered if view not in preferred_order)
+    return tuple(ordered_views)
 
 
 def find_simulation_files(
@@ -155,38 +277,32 @@ def find_simulation_files(
     resolved_time: float | None = None,
     resolved_time_token: str | None = None,
     algorithm_name: str | None = None,
+    resolved_time_fallback: float = DEFAULT_RESOLVED_TIME_FALLBACK,
 ) -> tuple[Path, ...]:
     candidates: list[Path] = []
     time_step_tokens = set(_simulation_time_step_tokens(time_step, time_step_token))
     resolved_time_tokens = set(_simulation_value_tokens(resolved_time, resolved_time_token))
 
-    for file_path in _iter_files(preprocessed_dir, ".npz"):
+    for file_path in iter_files(preprocessed_dir, ".npz"):
         metadata = parse_simulation_filename(file_path.name)
         if metadata is None:
             continue
-        if (
-            metadata.product_id != product_id
-            or metadata.timestamp != timestamp
-        ):
+        if metadata.product_id != product_id or metadata.timestamp != timestamp:
             continue
-
         if not (
-            metadata.time_step_token in time_step_tokens
-            or metadata.time_step == time_step
+            metadata.time_step_token in time_step_tokens or metadata.time_step == time_step
         ):
             continue
-
         if algorithm_name is not None and metadata.algorithm_name != algorithm_name:
             continue
-
         if not _matches_resolved_time(
             metadata.resolved_time,
             metadata.resolved_time_token,
             resolved_time,
             resolved_time_tokens,
+            resolved_time_fallback=resolved_time_fallback,
         ):
             continue
-
         candidates.append(file_path)
 
     return tuple(sorted(candidates))
@@ -198,6 +314,7 @@ def has_simulation_file(
     timestamp: str,
     time_step: float,
     time_step_token: str | None = None,
+    resolved_time_fallback: float = DEFAULT_RESOLVED_TIME_FALLBACK,
 ) -> bool:
     return bool(
         find_simulation_files(
@@ -206,188 +323,22 @@ def has_simulation_file(
             timestamp,
             time_step,
             time_step_token,
+            resolved_time_fallback=resolved_time_fallback,
         )
     )
 
 
-def parse_timestamp(timestamp: str) -> datetime:
-    return datetime.strptime(timestamp, "%Y%m%d.%H%M%S")
+def discover_preprocessed_datasets(
+    preprocessed_dir: Path,
+    view_specs: ViewSpecs | None = None,
+    simulation_view_keys: tuple[str, ...] = SIMULATION_VIEW_KEYS,
+) -> list[PreprocessedDataset]:
+    entries: dict[tuple[str, str, float], dict[str, object]] = {}
 
-
-@dataclass(frozen=True)
-class RawBatch:
-    product_id: str
-    timestamp: str
-    init_path: Path
-    updates_path: Path
-    trade_path: Path
-    is_preprocessed: bool = False
-
-    @property
-    def batch_id(self) -> str:
-        return f"{self.product_id}|{self.timestamp}"
-
-    @property
-    def display_name(self) -> str:
-        formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        suffix = " | preprocessed" if self.is_preprocessed else ""
-        return f"{self.product_id} | {formatted}{suffix}"
-
-
-@dataclass(frozen=True)
-class PlotDatasetLocator:
-    product_id: str
-    timestamp: str
-    time_step: float
-    preprocessed_dir: Path
-    time_step_token: str | None = None
-    resolved_time: float | None = None
-    resolved_time_token: str | None = None
-    algorithm_name: str | None = None
-    original_path: Path | None = None
-    simulation_path: Path | None = None
-    payload_cache: MutableMapping[Path, dict[str, object]] | None = field(
-        default=None,
-        compare=False,
-        hash=False,
-        repr=False,
-    )
-
-    @property
-    def base_id(self) -> str:
-        time_step_token = self.time_step_token or format_time_step(self.time_step)
-        return f"{self.product_id}-{self.timestamp}-{time_step_token}"
-
-    @property
-    def path(self) -> Path:
-        if self.original_path is not None:
-            return self.original_path
-        return self.preprocessed_dir / f"{self.base_id}-orderbook_for_plot.npz"
-
-
-@dataclass(frozen=True)
-class PreprocessedDataset:
-    product_id: str
-    timestamp: str
-    time_step: float
-    path: Path
-    available_views: tuple[str, ...]
-    time_step_token: str | None = None
-    resolved_time: float | None = None
-    resolved_time_token: str | None = None
-    algorithm_name: str | None = None
-    simulation_path: Path | None = None
-
-    @property
-    def dataset_id(self) -> str:
-        if self.simulation_path is not None:
-            return f"{self.path}#{self.simulation_path.name}"
-        return str(self.path)
-
-    @property
-    def display_name(self) -> str:
-        formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        views = ",".join(self.available_views)
-        simulation_suffix = (
-            f" | {self.simulation_path.stem}"
-            if self.simulation_path is not None
-            else ""
-        )
-        return (
-            f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s"
-            f"{simulation_suffix} | {views}"
-        )
-
-    def to_locator(
-        self,
-        preprocessed_dir: Path,
-        payload_cache: MutableMapping[Path, dict[str, object]] | None = None,
-    ) -> PlotDatasetLocator:
-        return PlotDatasetLocator(
-            product_id=self.product_id,
-            timestamp=self.timestamp,
-            time_step=self.time_step,
-            preprocessed_dir=preprocessed_dir,
-            time_step_token=self.time_step_token,
-            resolved_time=self.resolved_time,
-            resolved_time_token=self.resolved_time_token,
-            algorithm_name=self.algorithm_name,
-            original_path=self.path,
-            simulation_path=self.simulation_path,
-            payload_cache=payload_cache,
-        )
-
-
-def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
-    if not path.exists():
-        return []
-    return sorted(
-        entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix
-    )
-
-
-def detect_available_views(
-    path: Path,
-    dataset_hint: PlotDatasetLocator | None = None,
-) -> tuple[str, ...]:
-    try:
-        with np.load(path, allow_pickle=False) as data:
-            if "available_views" in data.files:
-                available_views = tuple(str(view) for view in data["available_views"].tolist())
-            else:
-                data_keys = set(data.files)
-                available_views = tuple(
-                    key
-                    for key, spec in PLOT_REGISTRY.items()
-                    if set(spec.required_payload_keys).issubset(data_keys)
-                )
-    except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
-
-    if (
-        dataset_hint is not None
-        and any(view_key in PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
-        and has_simulation_file(
-            dataset_hint.preprocessed_dir,
-            dataset_hint.product_id,
-            dataset_hint.timestamp,
-            dataset_hint.time_step,
-            dataset_hint.time_step_token,
-        )
-    ):
-        available_views = _union_available_views(
-            available_views,
-            tuple(
-                view_key
-                for view_key in SIMULATION_VIEW_KEYS
-                if view_key in PLOT_REGISTRY
-            ),
-        )
-
-    return available_views or ("orderbook",)
-
-
-def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
-    views: set[str] = set()
-    for view_group in view_groups:
-        views.update(view_group)
-
-    ordered_views = [view for view in PLOT_REGISTRY if view in views]
-    ordered_views.extend(sorted(views - set(ordered_views)))
-    return tuple(ordered_views)
-
-
-def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedDataset]:
-    entries: dict[
-        tuple[str, str, float],
-        dict[str, object],
-    ] = {}
-
-    for file_path in _iter_files(preprocessed_dir, ".npz"):
-        preprocessed_match = PREPROCESSED_RE.match(file_path.name)
+    for file_path in iter_files(preprocessed_dir, ".npz"):
+        preprocessed_match = match_preprocessed_filename(file_path.name)
         simulation_metadata = parse_simulation_filename(file_path.name)
-        simulation_match = simulation_metadata is not None
-        if not preprocessed_match and not simulation_match:
+        if not preprocessed_match and simulation_metadata is None:
             continue
 
         if preprocessed_match:
@@ -401,6 +352,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
             timestamp = simulation_metadata.timestamp
             time_step = simulation_metadata.time_step
             time_step_token = simulation_metadata.time_step_token
+
         key = (product_id, timestamp, time_step)
         entry = entries.setdefault(
             key,
@@ -417,23 +369,16 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         )
 
         if preprocessed_match:
-            locator = PlotDatasetLocator(
-                product_id=product_id,
-                timestamp=timestamp,
-                time_step=time_step,
-                preprocessed_dir=preprocessed_dir,
-                time_step_token=time_step_token,
-                original_path=file_path,
-            )
-
             try:
-                available_views = detect_available_views(file_path, locator)
+                available_views = detect_available_views(file_path, view_specs=view_specs)
             except PreprocessedDataError:
                 continue
-
             entry["orderbook_path"] = file_path
             entry["time_step_token"] = time_step_token
-            entry["orderbook_views"] = _union_available_views(available_views)
+            entry["orderbook_views"] = _union_available_views(
+                available_views,
+                preferred_order=DEFAULT_VIEW_ORDER,
+            )
             continue
 
         simulation_paths = entry["simulation_paths"]
@@ -476,16 +421,11 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                     product_id=str(entry["product_id"]),
                     timestamp=str(entry["timestamp"]),
                     time_step=float(entry["time_step"]),
-                    path=(
-                        orderbook_path if isinstance(orderbook_path, Path) else simulation_path
-                    ),
+                    path=orderbook_path if isinstance(orderbook_path, Path) else simulation_path,
                     available_views=_union_available_views(
                         base_views,
-                        tuple(
-                            view_key
-                            for view_key in SIMULATION_VIEW_KEYS
-                            if view_key in PLOT_REGISTRY
-                        ),
+                        simulation_view_keys,
+                        preferred_order=DEFAULT_VIEW_ORDER,
                     ),
                     time_step_token=time_step_token,
                     resolved_time=(
@@ -521,21 +461,21 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
 def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch]:
     entries: dict[tuple[str, str], dict[str, Path]] = {}
 
-    for file_path in _iter_files(raw_dir, ".csv"):
+    for file_path in iter_files(raw_dir, ".csv"):
         name = file_path.name
-        match = RAW_LEVEL2_INIT_RE.match(name)
+        match = match_raw_level2_init_filename(name)
         if match:
             key = (match.group("product_id"), match.group("timestamp"))
             entries.setdefault(key, {})["init"] = file_path
             continue
 
-        match = RAW_LEVEL2_UPDATES_RE.match(name)
+        match = match_raw_level2_updates_filename(name)
         if match:
             key = (match.group("product_id"), match.group("timestamp"))
             entries.setdefault(key, {})["updates"] = file_path
             continue
 
-        match = RAW_TRADE_RE.match(name)
+        match = match_raw_trade_filename(name)
         if match:
             key = (match.group("product_id"), match.group("timestamp"))
             entries.setdefault(key, {})["trade"] = file_path
@@ -543,14 +483,13 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
     preprocessed_keys = {
         (dataset.product_id, dataset.timestamp)
         for dataset in discover_preprocessed_datasets(preprocessed_dir)
-        if PREPROCESSED_RE.match(dataset.path.name)
+        if match_preprocessed_filename(dataset.path.name)
     }
 
     batches: list[RawBatch] = []
     for (product_id, timestamp), parts in sorted(entries.items()):
         if {"init", "updates", "trade"} - set(parts):
             continue
-
         batches.append(
             RawBatch(
                 product_id=product_id,
@@ -577,8 +516,9 @@ def load_preprocessed_payload(
         with np.load(path, allow_pickle=False) as data:
             payload = {key: data[key] for key in data.files}
     except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise PreprocessedDataError(f"Failed to load {path.name}: {error}") from error
+        raise PreprocessedDataFileError(f"Failed to load {path.name}: {error}") from error
 
+    _validate_preprocessed_payload_schema(payload, path)
     payload["product_id"] = dataset.product_id
     payload["timestamp"] = dataset.timestamp
     payload["time_step"] = dataset.time_step
@@ -587,3 +527,40 @@ def load_preprocessed_payload(
     if cache is not None:
         cache[path] = payload
     return payload
+
+
+def _validate_preprocessed_payload_schema(payload: dict[str, object], path: Path) -> None:
+    required_fields = ("price_axis", "time_axis", "data", "bid", "ask")
+    missing_fields = tuple(field for field in required_fields if field not in payload)
+    if missing_fields:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} is missing required fields: {missing_fields}."
+        )
+
+    data = payload["data"]
+    bid = payload["bid"]
+    ask = payload["ask"]
+    time_axis = payload["time_axis"]
+    price_axis = payload["price_axis"]
+
+    if time_axis.ndim != 1 or price_axis.ndim != 1:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has invalid axis dimensionality."
+        )
+    if data.ndim != 2 or bid.ndim != 1 or ask.ndim != 1:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has invalid data/bid/ask dimensionality."
+        )
+    if bid.shape != ask.shape:
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has mismatched bid/ask shapes."
+        )
+    if (
+        data.shape[0] != time_axis.shape[0]
+        or bid.shape[0] != time_axis.shape[0]
+        or ask.shape[0] != time_axis.shape[0]
+        or data.shape[1] != price_axis.shape[0]
+    ):
+        raise PreprocessedDataSchemaError(
+            f"Preprocessed dataset {path.name} has incompatible data/bid/ask axis lengths."
+        )

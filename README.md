@@ -144,3 +144,38 @@ Trade batch:
 - In `level2`, `Side` is `-1` for sell and `+1` for buy.
 - In `trade`, `Side` is `-1` for sell maker and `+1` for buy maker.
 - `Time` is measured in seconds from midnight of the filename date.
+
+## Preprocess API Boundaries
+
+`src.preprocess` now has an explicit package-level **public API** for stable imports.
+
+### Stable public API (import from `src.preprocess`)
+
+- Models: `RawBatch`, `PreprocessedDataset`, `PlotDatasetLocator`, `PreprocessContext`
+- Catalog: `discover_raw_batches`, `discover_preprocessed_datasets`, `find_simulation_files`, `has_simulation_file`
+- Filenames: `format_time_step`, `parse_timestamp`
+- I/O and services: `load_preprocessed_payload`, `DEFAULT_TIME_STEP`, `preprocess_batch`, `preprocess_batches`
+- Exceptions: `PreprocessError`, `PreprocessValidationError`, `PreprocessOutputConflictError`, `PreprocessedDataError`, `PreprocessedDataFileError`, `PreprocessedDataSchemaError`
+
+### Internal modules (import explicitly, no stability guarantee)
+
+- `src.preprocess.models`: preprocess domain models and context types
+- `src.preprocess.filenames`: raw/preprocessed/simulation filename parsing and token helpers
+- `src.preprocess.io`: CSV/NPZ I/O, schema validation, and preprocess context construction
+- `src.preprocess.catalog`: dataset discovery, aggregation, and simulation-file matching
+- `src.preprocess.service`: preprocess orchestration over the builder registry
+- `src.preprocess.common`: internal transitional re-export facade only
+- `src.preprocess.orderbook`, `src.preprocess.trades_scatter`, `src.preprocess.trade_volume_timeline`: plot-specific preprocess builders
+- `src.preprocess.adapters`: internal adapters such as registry-backed view detection
+
+### Migration and deprecation rule
+
+- New code should prefer the stable package-level API above.
+- GUI, simulation orchestration, dashboard code, and API-surface tests should import stable names from `src.preprocess` unless they explicitly need an internal helper.
+- Internal preprocess modules may import shared types from `src.preprocess.models`.
+- Do not add new external imports from `src.preprocess.catalog.RawBatch`, `src.preprocess.catalog.PreprocessedDataset`, `src.preprocess.catalog.PlotDatasetLocator`, or `src.preprocess.common.PreprocessContext`; those paths remain only as compatibility aliases.
+- If a caller needs an internal helper, import from the concrete internal module directly and treat it as refactorable.
+
+### Test command
+
+- PowerShell: ``$env:PYTHONPATH='.'; pytest test/test_preprocess_public_api.py test/test_preprocess_models_api.py test/test_preprocess_filenames.py test/test_preprocess_io.py test/test_preprocess_catalog_simulation_matching.py test/test_preprocess_catalog_view_detector.py test/test_preprocess_service_registry.py test/test_preprocess_discovery.py``
