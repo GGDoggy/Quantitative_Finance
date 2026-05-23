@@ -6,7 +6,7 @@ from src.plots import PLOT_REGISTRY
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
     list_algorithms,
-    simulate_batches,
+    simulate_raw_batches,
 )
 
 from .styles import COST_FILTERED_PLOT_TYPES, PLOT_PLACEHOLDER, SIMULATION_HEATMAP_PLOT_TYPES, TIMESTAMP_PLACEHOLDER, FILL_GROUP_PLACEHOLDER
@@ -200,7 +200,7 @@ class DashboardActionsMixin:
                 )
                 self._set_status(message, "primary")
 
-            simulation_results = simulate_batches(
+            simulation_results = simulate_raw_batches(
                 selected_batches,
                 output_dir=self.preprocessed_dir,
                 algorithm_name=str(algorithm_name),

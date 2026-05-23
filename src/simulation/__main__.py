@@ -1,56 +1,18 @@
-from .constants import DEFAULT_RESOLVED_TIME
-from .io import build_output_path, load_raw_dataset, parse_dataset_groups
+from .compat import (
+    format_dataset_line,
+    get_algorithm_names,
+    is_processed,
+    parse_dataset_groups,
+    parse_selection,
+    run_datasets_in_parallel,
+    run_dataset_simulation,
+    save_simulation_npz,
+)
 from .constants import DATA_V3_PATH, DEFAULT_BASE_TICK, DEFAULT_TIME_STEP, OUTPUT_PATH
-from .service import list_algorithms, save_result, simulate_loaded_data
-
-
-def _is_processed(dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
-    return build_output_path(
-        output_path,
-        dataset.product_id,
-        dataset.timestamp,
-        time_step,
-        algorithm_name,
-        resolved_time,
-    ).exists()
-
-
-def _format_dataset_line(index, dataset, output_path, time_step, algorithm_name, resolved_time=DEFAULT_RESOLVED_TIME):
-    output_file = build_output_path(
-        output_path,
-        dataset.product_id,
-        dataset.timestamp,
-        time_step,
-        algorithm_name,
-        resolved_time,
-    )
-    return f"[{index}] {dataset.file_stem} -> {output_file.name}"
-
-
-def _parse_selection(selection, item_count):
-    selection = selection.strip().lower()
-    if selection == "all":
-        return list(range(item_count))
-
-    chosen = []
-    for token in selection.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        if not token.isdigit():
-            raise ValueError(f"Invalid selection token: {token}")
-        index = int(token) - 1
-        if index < 0 or index >= item_count:
-            raise ValueError(f"Selection out of range: {token}")
-        chosen.append(index)
-
-    if not chosen:
-        raise ValueError("No dataset selected.")
-    return sorted(set(chosen))
 
 
 def prompt_algorithm_selection():
-    algorithms = list_algorithms()
+    algorithms = get_algorithm_names()
     print("Available simulation algorithms:")
     for index, algorithm_name in enumerate(algorithms, start=1):
         print(f"[{index}] {algorithm_name}")
@@ -70,34 +32,16 @@ def prompt_algorithm_selection():
 def prompt_dataset_selection(datasets, output_path, time_step, algorithm_name):
     print("Available unprocessed datasets:")
     for index, dataset in enumerate(datasets, start=1):
-        print(_format_dataset_line(index, dataset, output_path, time_step, algorithm_name))
+        print(format_dataset_line(index, dataset, output_path, time_step, algorithm_name))
     print("Enter a number, comma-separated numbers, or 'all'.")
 
     while True:
         raw = input("Selection: ")
         try:
-            selected_indices = _parse_selection(raw, len(datasets))
+            selected_indices = parse_selection(raw, len(datasets))
             return [datasets[index] for index in selected_indices]
         except ValueError as exc:
             print(exc)
-
-
-def _process_dataset(dataset, output_path, algorithm_name, time_step, base_tick):
-    loaded_data = load_raw_dataset(dataset)
-    result = simulate_loaded_data(
-        loaded_data,
-        algorithm_name=algorithm_name,
-        time_step=time_step,
-        base_tick=base_tick,
-    )
-    return save_result(
-        dataset,
-        output_dir=output_path,
-        algorithm_name=algorithm_name,
-        time_step=time_step,
-        result=result,
-        base_tick=base_tick,
-    )
 
 
 def main(
@@ -111,7 +55,7 @@ def main(
     pending = [
         dataset
         for dataset in datasets
-        if not _is_processed(dataset, output_path, time_step, algorithm_name)
+        if not is_processed(dataset, output_path, time_step, algorithm_name)
     ]
 
     if not pending:
@@ -119,10 +63,23 @@ def main(
         return
 
     selected = prompt_dataset_selection(pending, output_path, time_step, algorithm_name)
-    for dataset in selected:
-        print(f"Processing {dataset.file_stem} with {algorithm_name}...")
-        output_file = _process_dataset(dataset, output_path, algorithm_name, time_step, base_tick)
+    if len(selected) == 1:
+        dataset = selected[0]
+        print(f"Processing {dataset['file_stem']} with {algorithm_name}...")
+        result = run_dataset_simulation(dataset, algorithm_name, time_step, base_tick)
+        output_file = save_simulation_npz(
+            dataset,
+            output_path,
+            algorithm_name,
+            time_step,
+            base_tick,
+            result,
+        )
         print(f"Saved {output_file}")
+        return
+
+    print(f"Processing {len(selected)} datasets with {algorithm_name}...")
+    run_datasets_in_parallel(selected, output_path, algorithm_name, time_step, base_tick)
 
 
 if __name__ == "__main__":

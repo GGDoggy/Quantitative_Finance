@@ -19,7 +19,7 @@ Coinbase market-data collection, visualization, and simulation experiments.
 - `src/plots/`
   - Non-UI plot builders and plot registry definitions.
 - `src/simulation/`
-  - Fill-probability simulation module with a single public API at `src.simulation`.
+  - Fill-probability simulation module with a preferred library API plus temporary compatibility wrappers.
 - `test/`
   - Small scripts for legacy plotting and simulation experiments.
 
@@ -33,29 +33,33 @@ Coinbase market-data collection, visualization, and simulation experiments.
 
 ## Simulation Module
 
-Use `src.simulation` as the only supported import surface inside this repo.
+Use `src.simulation` as the preferred import surface inside this repo. Legacy
+helpers remain available during the transition for existing scripts and tests.
 
-- Public entry points:
+- Preferred public entry points:
   - `list_algorithms()`
   - `load_raw_dataset()`
   - `simulate_loaded_data()`
   - `simulate_batch()`
   - `simulate_batches()`
   - `save_result()`
+- GUI adapter entry points:
+  - `simulate_raw_batch()`
+  - `simulate_raw_batches()`
+- Transitional compatibility entry points:
+  - `src.simulation.compat`
+  - `src.simulation.library`
 - Internal implementation modules:
   - `registry.py`: algorithm lookup
   - `io.py`: raw CSV loading and `.npz` serialization
   - `runner.py`: orchestration and parallel execution
   - `service.py`: GUI-facing adapter from `RawBatch`
-- Removed legacy entry points:
-  - `src.simulation.compat`
-  - `src.simulation.library`
-  - `python test/run_simulation.py`
 
-Run the interactive helper only as a repo-internal module:
+Interactive helpers are available through both module and wrapper entry points:
 
 ```bash
 python -m src.simulation
+python test/run_simulation.py
 ```
 
 ## Data Layout

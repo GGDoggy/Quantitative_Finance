@@ -8,6 +8,7 @@ from .io import build_output_path, load_raw_dataset, save_result_file
 from .models import (
     LoadedMarketData,
     RawSimulationDataset,
+    SimulationJobResult,
     SimulationRequest,
     SimulationResult,
     SimulationWorkerPayload,
@@ -33,6 +34,62 @@ def run_simulation_request(
     )
 
 
+def save_result(
+    result: SimulationResult,
+    dataset: RawSimulationDataset,
+    request: SimulationRequest,
+    output_dir: Path | str,
+) -> Path:
+    output_file = build_output_path(
+        output_dir,
+        dataset.product_id,
+        dataset.timestamp,
+        request.time_step,
+        request.algorithm,
+        request.resolved_time,
+    )
+    return save_result_file(
+        output_file,
+        algorithm_name=request.algorithm,
+        dataset=dataset,
+        time_step=request.time_step,
+        base_tick=request.base_tick,
+        resolved_time=request.resolved_time,
+        result=result,
+    )
+
+
+def simulate_loaded_data(
+    data: LoadedMarketData,
+    request: SimulationRequest,
+) -> SimulationResult:
+    return run_simulation_request(request, data)
+
+
+def simulate_batch(
+    dataset: RawSimulationDataset,
+    request: SimulationRequest,
+    output_dir: Path | str,
+) -> SimulationJobResult:
+    output_path = build_output_path(
+        output_dir,
+        dataset.product_id,
+        dataset.timestamp,
+        request.time_step,
+        request.algorithm,
+        request.resolved_time,
+    )
+    overwritten = output_path.exists()
+    loaded_data = load_raw_dataset(dataset)
+    result = simulate_loaded_data(loaded_data, request)
+    saved_path = save_result(result, dataset, request, output_dir)
+    return SimulationJobResult(
+        dataset=dataset,
+        output_path=saved_path,
+        overwritten=overwritten,
+    )
+
+
 def get_default_worker_count(task_count: int) -> int:
     detected = os.cpu_count() or 1
     return max(1, min(task_count, detected))
@@ -53,16 +110,8 @@ def process_dataset_job(
     )
     overwritten = output_file.exists()
     loaded_data = load_raw_dataset(dataset)
-    result = run_simulation_request(request, loaded_data)
-    saved_path = save_result_file(
-        output_file,
-        algorithm_name=request.algorithm,
-        dataset=dataset,
-        time_step=request.time_step,
-        base_tick=request.base_tick,
-        resolved_time=request.resolved_time,
-        result=result,
-    )
+    result = simulate_loaded_data(loaded_data, request)
+    saved_path = save_result(result, dataset, request, output_path)
     return SimulationWorkerPayload(
         file_stem=dataset.file_stem,
         output_file=str(saved_path),
@@ -95,3 +144,22 @@ def run_datasets_in_parallel(
         raise RuntimeError(f"Batch processing failed for: {failed_stems}")
 
     return results
+
+
+def simulate_batches(
+    datasets: list[RawSimulationDataset],
+    request: SimulationRequest,
+    output_dir: Path | str,
+) -> list[SimulationJobResult]:
+    if len(datasets) <= 1:
+        return [simulate_batch(dataset, request, output_dir) for dataset in datasets]
+
+    results = run_datasets_in_parallel(datasets, output_dir, request)
+    dataset_by_stem = {dataset.file_stem: dataset for dataset in datasets}
+    job_results = [
+        result.to_job_result(dataset_by_stem[result.file_stem])
+        for result in results
+    ]
+    order_by_stem = {dataset.file_stem: index for index, dataset in enumerate(datasets)}
+    job_results.sort(key=lambda result: order_by_stem[result.dataset.file_stem])
+    return job_results
