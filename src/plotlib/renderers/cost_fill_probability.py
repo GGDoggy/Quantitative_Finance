@@ -1,36 +1,22 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Iterable
-
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from src.plots.fill_probability import _simulation_path, _heatmap_trace
-from src.plots.profit_heatmap import load_simulation_arrays
-from src.plots.settings import (
+from src.plotlib.errors import PayloadSchemaVersionError
+from src.plotlib.options import (
     ConditionalFillProbabilityPlotSettings,
     PlotRenderOptions,
 )
-from src.plots.types import PlotDatasetLocator
-
-
-RESOLVED_ONLY = True
-
-
-def _bin_edges(
-    bins: int, *, size_min: float, size_max: float, use_log_bins: bool
-) -> tuple[np.ndarray, np.ndarray]:
-    if use_log_bins:
-        if size_min <= 0 or size_max <= 0:
-            raise ValueError("Log-spaced bins require a strictly positive size range.")
-        near_edges = np.geomspace(size_min, size_max, bins + 1)
-        opp_edges = np.geomspace(size_min, size_max, bins + 1)
-    else:
-        near_edges = np.linspace(size_min, size_max, bins + 1)
-        opp_edges = np.linspace(size_min, size_max, bins + 1)
-    return near_edges, opp_edges
+from src.plotlib.renderers.simulation_common import (
+    RESOLVED_ONLY,
+    apply_square_heatmap_axes,
+    bin_edges,
+    heatmap_trace,
+    shared_sample_count_zmax,
+)
+from src.plotlib.types import SimulationArraysV1
 
 
 def compute_cost_filtered_fill_probability_grid(
@@ -51,10 +37,7 @@ def compute_cost_filtered_fill_probability_grid(
     profit = np.asarray(profit, dtype=float)
 
     finite_mask = np.isfinite(near_size) & np.isfinite(opp_size) & np.isfinite(profit)
-    if RESOLVED_ONLY:
-        valid_mask = finite_mask & (result != -1)
-    else:
-        valid_mask = finite_mask
+    valid_mask = finite_mask & (result != -1) if RESOLVED_ONLY else finite_mask
 
     profit_mask = valid_mask & (profit > cost)
     near_size = near_size[profit_mask]
@@ -67,7 +50,7 @@ def compute_cost_filtered_fill_probability_grid(
             "the profit > cost filter."
         )
 
-    near_edges, opp_edges = _bin_edges(
+    near_edges, opp_edges = bin_edges(
         bins,
         size_min=size_min,
         size_max=size_max,
@@ -96,22 +79,8 @@ def _metric_label(metric_key: str) -> str:
     raise ValueError(f"Unsupported profit metric: {metric_key}")
 
 
-def _shared_sample_count_zmax(*sample_counts: np.ndarray) -> float | None:
-    maxima = []
-    for sample_count in sample_counts:
-        finite_values = sample_count[np.isfinite(sample_count)]
-        if finite_values.size > 0:
-            maxima.append(float(np.nanmax(finite_values)))
-    if not maxima:
-        return None
-    shared_limit = max(maxima)
-    if shared_limit <= 0:
-        return None
-    return shared_limit
-
-
 def _grid_for_side(
-    arrays: dict[str, np.ndarray],
+    arrays: SimulationArraysV1,
     side: str,
     metric_key: str,
     cost: float,
@@ -130,35 +99,8 @@ def _grid_for_side(
     )
 
 
-def _load_arrays(paths: Iterable[Path | str]) -> dict[str, np.ndarray]:
-    arrays = load_simulation_arrays(paths)
-    result_arrays = {
-        "bid_result": [],
-        "ask_result": [],
-    }
-
-    for path in paths:
-        with np.load(path, allow_pickle=False) as data:
-            for side in ("bid", "ask"):
-                key = f"{side}_result"
-                if key not in data.files:
-                    raise KeyError(
-                        f"Simulation file {Path(path).name} is missing required key(s): "
-                        f"{key}"
-                    )
-                result_arrays[key].append(np.asarray(data[key], dtype=int))
-
-    arrays.update(
-        {
-            key: np.concatenate(values) if values else np.array([], dtype=int)
-            for key, values in result_arrays.items()
-        }
-    )
-    return arrays
-
-
 def build_cost_fill_probability_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     metric_key: str,
     render_options: PlotRenderOptions | None = None,
 ) -> go.Figure:
@@ -173,18 +115,20 @@ def build_cost_fill_probability_view(
         )
         else ConditionalFillProbabilityPlotSettings()
     )
-    simulation_paths = [_simulation_path(locator) for locator in locators]
-    arrays = _load_arrays(simulation_paths)
+    if simulation_arrays.get("schema_version") != "1":
+        raise PayloadSchemaVersionError(
+            "simulation arrays", "1", simulation_arrays.get("schema_version")
+        )
 
     bid_near_edges, bid_opp_edges, bid_probability, bid_sample_count = _grid_for_side(
-        arrays,
+        simulation_arrays,
         "bid",
         metric_key,
         cost,
         settings,
     )
     ask_near_edges, ask_opp_edges, ask_probability, ask_sample_count = _grid_for_side(
-        arrays,
+        simulation_arrays,
         "ask",
         metric_key,
         cost,
@@ -193,7 +137,7 @@ def build_cost_fill_probability_view(
     shared_count_zmax = (
         settings.sample_count_range.max
         if not settings.sample_count_range.auto
-        else _shared_sample_count_zmax(bid_sample_count, ask_sample_count)
+        else shared_sample_count_zmax(bid_sample_count, ask_sample_count)
     )
     count_zmin = (
         settings.sample_count_range.min
@@ -216,7 +160,7 @@ def build_cost_fill_probability_view(
     )
 
     figure.add_trace(
-        _heatmap_trace(
+        heatmap_trace(
             bid_near_edges,
             bid_opp_edges,
             bid_probability,
@@ -235,7 +179,7 @@ def build_cost_fill_probability_view(
         col=1,
     )
     figure.add_trace(
-        _heatmap_trace(
+        heatmap_trace(
             ask_near_edges,
             ask_opp_edges,
             ask_probability,
@@ -250,7 +194,7 @@ def build_cost_fill_probability_view(
         col=2,
     )
     figure.add_trace(
-        _heatmap_trace(
+        heatmap_trace(
             bid_near_edges,
             bid_opp_edges,
             bid_sample_count,
@@ -269,7 +213,7 @@ def build_cost_fill_probability_view(
         col=1,
     )
     figure.add_trace(
-        _heatmap_trace(
+        heatmap_trace(
             ask_near_edges,
             ask_opp_edges,
             ask_sample_count,
@@ -284,22 +228,7 @@ def build_cost_fill_probability_view(
         col=2,
     )
 
-    for row in (1, 2):
-        for col in (1, 2):
-            figure.update_xaxes(title_text="Near Size", row=row, col=col)
-            figure.update_yaxes(title_text="Opp Size", row=row, col=col)
-            if settings.axis.use_log_bins:
-                figure.update_xaxes(type="log", row=row, col=col)
-                figure.update_yaxes(type="log", row=row, col=col)
-            figure.update_xaxes(constrain="domain", row=row, col=col)
-            figure.update_yaxes(
-                constrain="domain",
-                scaleanchor=f"x{'' if (row, col) == (1, 1) else (row - 1) * 2 + col}",
-                scaleratio=1,
-                row=row,
-                col=col,
-            )
-
+    apply_square_heatmap_axes(figure, settings)
     cost_token = format(cost, "g")
     figure.update_layout(
         title=f"{metric_label} Fill Probability with Profit > Cost ({cost_token})",
@@ -312,22 +241,22 @@ def build_cost_fill_probability_view(
 
 
 def build_mid_cost_fill_probability_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ) -> go.Figure:
     return build_cost_fill_probability_view(
-        locators,
+        simulation_arrays,
         "mid_profit",
         render_options=render_options,
     )
 
 
 def build_micro_cost_fill_probability_view(
-    locators: list[PlotDatasetLocator],
+    simulation_arrays: SimulationArraysV1,
     render_options: PlotRenderOptions | None = None,
 ) -> go.Figure:
     return build_cost_fill_probability_view(
-        locators,
+        simulation_arrays,
         "micro_profit",
         render_options=render_options,
     )

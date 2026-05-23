@@ -128,10 +128,23 @@ def preprocess_batch(
             continue
 
         chunk = spec.preprocess_builder(context)
-        if not all(required_key in chunk for required_key in spec.required_payload_keys):
+        try:
+            if spec.payload_kind == "orderbook":
+                normalized_chunk = _validate_orderbook_chunk(chunk, batch, time_step)
+                persistable_chunk = _persistable_payload(
+                    normalized_chunk,
+                    ORDERBOOK_PERSISTED_KEYS,
+                )
+            else:
+                normalized_chunk = _validate_trades_chunk(chunk, batch, time_step)
+                persistable_chunk = _persistable_payload(
+                    normalized_chunk,
+                    TRADES_PERSISTED_KEYS,
+                )
+        except (KeyError, TypeError, ValueError):
             continue
 
-        _merge_payload_chunk(payload, chunk)
+        _merge_payload_chunk(payload, persistable_chunk)
         available_views.append(plot_key)
 
     output_dir.mkdir(parents=True, exist_ok=True)

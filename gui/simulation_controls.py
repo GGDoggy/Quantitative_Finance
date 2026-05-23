@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import math
 
-from src.plots import DashboardSimulationHeatmapSettings
-from src.plots.settings import (
+from src.plotlib import DashboardSimulationHeatmapSettings
+from src.plotlib.options import (
     ConditionalFillProbabilityPlotSettings,
     FillProbabilityPlotSettings,
     HeatmapAxisSettings,

@@ -7,8 +7,10 @@ import math
 import panel as pn
 from plotly.graph_objects import Figure
 
-from src.plots import PLOT_REGISTRY, PlotRenderOptions
-from src.preprocess import PlotDatasetLocator, PreprocessedDataset
+from src.app_plot_adapters import load_plot_input
+from src.app_plot_registry import APP_PLOT_REGISTRY, supports_plot_type
+from src.plotlib import PlotRenderOptions
+from src.preprocess import PreprocessedDataset
 
 from .styles import (
     COST_FILTERED_PLOT_TYPES,
@@ -37,10 +39,11 @@ class DashboardRenderingMixin:
         return cost
 
     def _build_plot_pane(
-        self, plot_type: str, locators: list[PlotDatasetLocator]
+        self, plot_type: str, selected_datasets: list[PreprocessedDataset]
     ) -> pn.viewable.Viewable:
         """Build the Panel pane for a plot type and dataset locator list."""
-        builder = PLOT_REGISTRY[plot_type].plot_builder
+        builder = APP_PLOT_REGISTRY[plot_type].builder
+        plot_input = load_plot_input(plot_type, selected_datasets)
         render_options = PlotRenderOptions(
             cost=self._selected_cost() if plot_type in COST_FILTERED_PLOT_TYPES else None,
             simulation_heatmap_settings=(
@@ -49,7 +52,7 @@ class DashboardRenderingMixin:
                 else None
             ),
         )
-        plot = builder(locators, render_options=render_options)
+        plot = builder(plot_input, render_options=render_options)
         if isinstance(plot, Figure):
             themed_plot = Figure(plot)
             themed_plot.update_layout(**PLOTLY_DARK_LAYOUT)
@@ -137,7 +140,7 @@ class DashboardRenderingMixin:
         unsupported = [
             dataset.display_name
             for dataset in selected_datasets
-            if plot_type not in dataset.available_views
+            if not supports_plot_type(dataset, plot_type)
         ]
         dataset_lines = "\n".join(f"- `{dataset}`" for dataset in unsupported)
         notice = pn.pane.Alert(
@@ -261,13 +264,10 @@ class DashboardRenderingMixin:
             return
         plot_label = self._plot_label_for_type(plot_type)
         selected_datasets = self._selected_datasets_for_plot()
-        locators: list[PlotDatasetLocator] = [
-            dataset.to_locator(self.preprocessed_dir) for dataset in selected_datasets
-        ]
         selected_dataset_count = len(selected_datasets)
 
         try:
-            result_pane = self._build_plot_pane(plot_type, locators)
+            result_pane = self._build_plot_pane(plot_type, selected_datasets)
             self.plot_area.objects = [
                 self._plot_card(
                     plot_type, plot_label, selected_dataset_count, result_pane

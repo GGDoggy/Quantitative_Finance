@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.plots import PLOT_LABELS, PLOT_REGISTRY
+from src.app_plot_registry import (
+    APP_PLOT_LABELS,
+    get_dataset_plot_types,
+    get_product_plot_types,
+    supports_plot_type,
+)
 from src.preprocess import (
     PreprocessedDataset,
     discover_preprocessed_datasets,
@@ -89,7 +94,7 @@ class DashboardCatalogMixin:
             {
                 dataset.product_id
                 for dataset in self.preprocessed_datasets
-                if any(view in PLOT_REGISTRY for view in dataset.available_views)
+                if get_dataset_plot_types(dataset)
             }
         )
 
@@ -122,11 +127,11 @@ class DashboardCatalogMixin:
 
     def _plot_label_for_type(self, plot_type: str) -> str:
         """Return the user-facing label for a plot type."""
-        return PLOT_LABELS.get(plot_type, plot_type)
+        return APP_PLOT_LABELS.get(plot_type, plot_type)
 
     def _plot_type_for_label(self, plot_label: str) -> str:
         """Resolve a user-facing plot label back to its plot type."""
-        return next(key for key, value in PLOT_LABELS.items() if value == plot_label)
+        return next(key for key, value in APP_PLOT_LABELS.items() if value == plot_label)
 
     def _datasets_for_product(self, product_id: str) -> list[PreprocessedDataset]:
         """Return all datasets belonging to the given product."""
@@ -138,16 +143,9 @@ class DashboardCatalogMixin:
 
     def _available_plot_labels(self, product_id: str) -> list[str]:
         """Return enabled plot labels for a product in registry order."""
-        plot_types = {
-            view
-            for dataset in self._datasets_for_product(product_id)
-            for view in dataset.available_views
-            if view in PLOT_REGISTRY
-        }
         return [
             self._plot_label_for_type(plot_type)
-            for plot_type in PLOT_REGISTRY
-            if plot_type in plot_types
+            for plot_type in get_product_plot_types(self._datasets_for_product(product_id))
         ]
 
     def _dataset_selection_key(self, dataset: PreprocessedDataset) -> str:
@@ -167,7 +165,7 @@ class DashboardCatalogMixin:
         """Return timestamp dropdown options for a product and plot type."""
         datasets_by_key: dict[str, PreprocessedDataset] = {}
         for dataset in self._datasets_for_product(product_id):
-            if plot_type not in dataset.available_views:
+            if not supports_plot_type(dataset, plot_type):
                 continue
             datasets_by_key.setdefault(self._dataset_selection_key(dataset), dataset)
 
@@ -219,10 +217,7 @@ class DashboardCatalogMixin:
         simulation_datasets = [
             dataset
             for dataset in self._datasets_for_product(product_id)
-            if any(
-                view in dataset.available_views
-                for view in SIMULATION_HEATMAP_PLOT_TYPES
-            )
+            if any(supports_plot_type(dataset, view) for view in SIMULATION_HEATMAP_PLOT_TYPES)
             and dataset.simulation_path is not None
         ]
         groups = self._simulation_groups(simulation_datasets)
@@ -283,7 +278,7 @@ class DashboardCatalogMixin:
             selected_datasets = [
                 dataset
                 for dataset in product_datasets
-                if plot_type in dataset.available_views
+                if supports_plot_type(dataset, plot_type)
                 and dataset.simulation_path is not None
                 and self._simulation_group_value(self._simulation_group_key(dataset))
                 == selected_group
@@ -298,7 +293,7 @@ class DashboardCatalogMixin:
             dataset
             for dataset in product_datasets
             if self._dataset_selection_key(dataset) == selected_dataset_key
-            and plot_type in dataset.available_views
+            and supports_plot_type(dataset, plot_type)
         ]
         non_simulation_datasets = [
             dataset for dataset in matching_datasets if dataset.simulation_path is None
@@ -330,8 +325,7 @@ class DashboardCatalogMixin:
         product_datasets = self._datasets_for_product(product_id)
         available_views = [
             self._plot_label_for_type(plot_type)
-            for plot_type in PLOT_REGISTRY
-            if any(plot_type in dataset.available_views for dataset in product_datasets)
+            for plot_type in get_product_plot_types(product_datasets)
         ]
         selected_datasets = self._selected_datasets_for_plot()
 
