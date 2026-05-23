@@ -5,13 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from src.plots import PLOT_LABELS, PLOT_REGISTRY
-from src.preprocess.adapters.plot_registry_detector import PlotRegistryViewDetector
 from src.preprocess import (
     PreprocessedDataset,
     discover_preprocessed_datasets,
     discover_raw_batches,
 )
-from src.preprocess.filenames import format_time_step, parse_timestamp
+from src.preprocess.datasets import format_time_step, parse_timestamp
 
 from .styles import SIMULATION_HEATMAP_PLOT_TYPES
 
@@ -19,11 +18,18 @@ from .styles import SIMULATION_HEATMAP_PLOT_TYPES
 class DashboardCatalogMixin:
     """Provide catalog refresh and option-building helpers for the dashboard."""
 
+    @staticmethod
+    def _plot_view_specs() -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return tuple(
+            (key, spec.required_payload_keys)
+            for key, spec in PLOT_REGISTRY.items()
+        )
+
     def refresh_catalog(self) -> None:
         """Reload raw batches and preprocessed datasets from the configured paths."""
         datasets = discover_preprocessed_datasets(
             self.preprocessed_dir,
-            view_detector=PlotRegistryViewDetector(PLOT_REGISTRY),
+            view_specs=self._plot_view_specs(),
         )
         batches = discover_raw_batches(self.raw_dir, self.preprocessed_dir)
         self.preprocessed_datasets = datasets

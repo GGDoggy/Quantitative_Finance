@@ -106,16 +106,8 @@ def build_orderbook_payload(context: "PreprocessContext") -> dict[str, object]:
     return implementation(context)
 
 
-def build_trades_scatter_payload(context: "PreprocessContext") -> dict[str, object]:
-    from src.preprocess.trades_scatter import build_trades_scatter_payload as implementation
-
-    return implementation(context)
-
-
-def build_trade_volume_timeline_payload(context: "PreprocessContext") -> dict[str, object]:
-    from src.preprocess.trade_volume_timeline import (
-        build_trade_volume_timeline_payload as implementation,
-    )
+def build_trade_payload(context: "PreprocessContext") -> dict[str, object]:
+    from src.preprocess.service import build_trade_payload as implementation
 
     return implementation(context)
 
@@ -132,14 +124,14 @@ PLOT_REGISTRY: dict[str, PlotSpec] = {
         key="trades_scatter",
         label="Trades Scatter",
         plot_builder=build_trades_scatter_view,
-        preprocess_builder=build_trades_scatter_payload,
+        preprocess_builder=build_trade_payload,
         required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
     ),
     "trade_volume_timeline": PlotSpec(
         key="trade_volume_timeline",
         label="Trade Volume Timeline",
         plot_builder=build_trade_volume_timeline_view,
-        preprocess_builder=build_trade_volume_timeline_payload,
+        preprocess_builder=build_trade_payload,
         required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
     ),
     "fill_probability": PlotSpec(

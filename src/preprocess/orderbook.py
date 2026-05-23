@@ -9,11 +9,6 @@ import numpy as np
 from .models import PreprocessContext
 
 
-def _timestamp_to_unix(timestamp: str) -> int:
-    parsed = time.strptime(timestamp, "%Y%m%d.%H%M%S")
-    return calendar.timegm(parsed)
-
-
 def update_orderbook(orderbook: np.ndarray, price_levels: np.ndarray, price: float, volume: float, side: float) -> None:
     index = np.searchsorted(price_levels, price)
     orderbook[index] = volume * side * -1
@@ -109,10 +104,11 @@ def build_orderbook_history(
 
 
 def build_orderbook_payload(context: PreprocessContext) -> dict[str, object]:
+    parsed = time.strptime(context.batch.timestamp, "%Y%m%d.%H%M%S")
     price_axis, time_axis, data, bid, ask, mid = build_orderbook_history(
         context.init_rows,
         context.updates_rows,
-        _timestamp_to_unix(context.batch.timestamp),
+        calendar.timegm(parsed),
         context.time_step,
     )
     return {

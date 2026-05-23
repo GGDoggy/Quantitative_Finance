@@ -13,13 +13,13 @@ class RawBatchLike(Protocol):
 
 
 def _parse_timestamp(value: str):
-    from .filenames import parse_timestamp
+    from .datasets import parse_timestamp
 
     return parse_timestamp(value)
 
 
 def _format_time_step(value: float) -> str:
-    from .filenames import format_time_step
+    from .datasets import format_time_step
 
     return format_time_step(value)
 
