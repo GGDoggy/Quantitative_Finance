@@ -1,8 +1,4 @@
-"""Application-level plot capability registry.
-
-Centralizes UI metadata and dataset capability rules so catalog/discovery code
-can determine available views without depending on plotting internals.
-"""
+"""Application-level plot registry and dataset-to-plot capability mapping."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,6 +22,7 @@ PayloadType = Literal["orderbook", "trades", "simulation"]
 class SupportsAppPlotDataset(Protocol):
     path: object
     simulation_path: object
+    available_views: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -119,3 +116,38 @@ APP_PLOT_REGISTRY: dict[str, AppPlotEntry] = {
 }
 
 APP_PLOT_LABELS = {plot_id: entry.label for plot_id, entry in APP_PLOT_REGISTRY.items()}
+
+SIMULATION_PLOT_IDS = (
+    "fill_probability",
+    "mid_profit",
+    "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+)
+
+
+def get_dataset_plot_types(dataset: SupportsAppPlotDataset) -> tuple[str, ...]:
+    dataset_capabilities = set(dataset.available_views)
+    return tuple(
+        plot_id
+        for plot_id, entry in APP_PLOT_REGISTRY.items()
+        if entry.supports_dataset(dataset)
+        and (plot_id in SIMULATION_PLOT_IDS or plot_id in dataset_capabilities)
+    )
+
+
+def supports_plot_type(dataset: SupportsAppPlotDataset, plot_type: str) -> bool:
+    if plot_type not in APP_PLOT_REGISTRY:
+        return False
+    return plot_type in get_dataset_plot_types(dataset)
+
+
+def get_product_plot_types(datasets: list[SupportsAppPlotDataset]) -> tuple[str, ...]:
+    supported = {
+        plot_type
+        for dataset in datasets
+        for plot_type in get_dataset_plot_types(dataset)
+    }
+    return tuple(
+        plot_id for plot_id in APP_PLOT_REGISTRY if plot_id in supported
+    )

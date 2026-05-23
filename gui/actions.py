@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 
-from src.app_plot_registry import APP_PLOT_REGISTRY
+from src.app_plot_registry import get_dataset_plot_types
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
     get_algorithm,
@@ -259,14 +259,10 @@ class DashboardActionsMixin:
         preferred_plot_type = next(
             (
                 view
-                for view in dataset.available_views
-                if view in APP_PLOT_REGISTRY
-                and view not in SIMULATION_HEATMAP_PLOT_TYPES
+                for view in get_dataset_plot_types(dataset)
+                if view not in SIMULATION_HEATMAP_PLOT_TYPES
             ),
-            next(
-                (view for view in dataset.available_views if view in APP_PLOT_REGISTRY),
-                None,
-            ),
+            next((view for view in get_dataset_plot_types(dataset)), None),
         )
         preferred_plot_label = (
             self._plot_label_for_type(preferred_plot_type)

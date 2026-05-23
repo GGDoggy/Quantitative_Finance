@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.app_plot_registry import APP_PLOT_REGISTRY
-from src.plotlib import (
+from src.plotlib.loaders import (
     load_orderbook_payloads,
     load_simulation_arrays_from_metadata,
     load_trades_payloads,

@@ -8,7 +8,7 @@ import panel as pn
 from plotly.graph_objects import Figure
 
 from src.app_plot_adapters import load_plot_input
-from src.app_plot_registry import APP_PLOT_REGISTRY
+from src.app_plot_registry import APP_PLOT_REGISTRY, supports_plot_type
 from src.plotlib import PlotRenderOptions
 from src.preprocess import PreprocessedDataset
 
@@ -140,7 +140,7 @@ class DashboardRenderingMixin:
         unsupported = [
             dataset.display_name
             for dataset in selected_datasets
-            if plot_type not in dataset.available_views
+            if not supports_plot_type(dataset, plot_type)
         ]
         dataset_lines = "\n".join(f"- `{dataset}`" for dataset in unsupported)
         notice = pn.pane.Alert(

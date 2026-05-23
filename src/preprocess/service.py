@@ -15,9 +15,17 @@ from src.preprocess.catalog import (
 )
 from src.preprocess.common import build_context
 from src.preprocess.registry import PREPROCESS_PLOT_REGISTRY
+from src.plotlib.types import (
+    OrderbookPayloadV1,
+    TradesPayloadV1,
+    normalize_orderbook_payload_to_v1,
+    normalize_trades_payload_to_v1,
+)
 
 
 DEFAULT_TIME_STEP = 0.01
+ORDERBOOK_PERSISTED_KEYS = ("price_axis", "time_axis", "data", "bid", "ask", "mid")
+TRADES_PERSISTED_KEYS = ("trade_time", "trade_price", "trade_volume", "trade_side")
 
 
 def _merge_payload_chunk(base_payload: dict[str, object], chunk: dict[str, object]) -> None:
@@ -40,6 +48,43 @@ def _merge_payload_chunk(base_payload: dict[str, object], chunk: dict[str, objec
             raise ValueError(f"Conflicting preprocess outputs for key '{key}'.")
 
 
+def _validate_orderbook_chunk(
+    chunk: dict[str, object],
+    batch: RawBatch,
+    time_step: float,
+) -> OrderbookPayloadV1:
+    return normalize_orderbook_payload_to_v1(
+        {
+            "product_id": batch.product_id,
+            "timestamp": batch.timestamp,
+            "time_step": time_step,
+            **chunk,
+        }
+    )
+
+
+def _validate_trades_chunk(
+    chunk: dict[str, object],
+    batch: RawBatch,
+    time_step: float,
+) -> TradesPayloadV1:
+    return normalize_trades_payload_to_v1(
+        {
+            "product_id": batch.product_id,
+            "timestamp": batch.timestamp,
+            "time_step": time_step,
+            **chunk,
+        }
+    )
+
+
+def _persistable_payload(
+    normalized_payload: OrderbookPayloadV1 | TradesPayloadV1,
+    persisted_keys: tuple[str, ...],
+) -> dict[str, object]:
+    return {key: normalized_payload[key] for key in persisted_keys}
+
+
 def preprocess_batch(
     batch: RawBatch,
     output_dir: Path,
@@ -51,10 +96,23 @@ def preprocess_batch(
 
     for plot_key, spec in PREPROCESS_PLOT_REGISTRY.items():
         chunk = spec.preprocess_builder(context)
-        if not all(required_key in chunk for required_key in spec.required_payload_keys):
+        try:
+            if spec.payload_kind == "orderbook":
+                normalized_chunk = _validate_orderbook_chunk(chunk, batch, time_step)
+                persistable_chunk = _persistable_payload(
+                    normalized_chunk,
+                    ORDERBOOK_PERSISTED_KEYS,
+                )
+            else:
+                normalized_chunk = _validate_trades_chunk(chunk, batch, time_step)
+                persistable_chunk = _persistable_payload(
+                    normalized_chunk,
+                    TRADES_PERSISTED_KEYS,
+                )
+        except (KeyError, TypeError, ValueError):
             continue
 
-        _merge_payload_chunk(payload, chunk)
+        _merge_payload_chunk(payload, persistable_chunk)
         available_views.append(plot_key)
 
     output_dir.mkdir(parents=True, exist_ok=True)

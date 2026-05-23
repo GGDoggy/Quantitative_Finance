@@ -29,6 +29,15 @@ def test_renderer_loader_does_not_import_discovery_locator_or_catalog_modules() 
     assert "src.preprocess.catalog" not in sys.modules
 
 
+def test_preprocess_catalog_does_not_import_app_registry() -> None:
+    _clear_modules("src.preprocess.catalog", "src.app_plot_registry")
+
+    importlib.import_module("src.preprocess.catalog")
+
+    assert "src.preprocess.catalog" in sys.modules
+    assert "src.app_plot_registry" not in sys.modules
+
+
 def test_app_registry_can_import_src_plotlib_without_reverse_dependency() -> None:
     _clear_modules("src.app_plot_registry", "src.plotlib")
 

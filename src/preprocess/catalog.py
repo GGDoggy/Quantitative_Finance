@@ -11,7 +11,6 @@ import zipfile
 import numpy as np
 
 from src.plotlib.errors import PreprocessedDataError
-from src.app_plot_registry import APP_PLOT_REGISTRY
 from src.plotlib.discovery import (
     SimulationFileMetadata,
     find_simulation_files,
@@ -19,13 +18,10 @@ from src.plotlib.discovery import (
     parse_simulation_filename,
 )
 
-
-SIMULATION_VIEW_KEYS = (
-    "fill_probability",
-    "mid_profit",
-    "micro_profit",
-    "mid_fill_probability_cost",
-    "micro_fill_probability_cost",
+DEFAULT_PREPROCESSED_VIEW_TOKENS = (
+    "orderbook",
+    "trades_scatter",
+    "trade_volume_timeline",
 )
 
 
@@ -88,7 +84,7 @@ class PreprocessedDataset:
     @property
     def display_name(self) -> str:
         formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        views = ",".join(self.available_views)
+        views = ",".join(self.available_views) or "none"
         simulation_suffix = (
             f" | {self.simulation_path.stem}"
             if self.simulation_path is not None
@@ -106,6 +102,16 @@ def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
     return sorted(
         entry for entry in path.iterdir() if entry.is_file() and entry.suffix == suffix
     )
+
+
+def _read_dataset_capabilities(path: Path) -> tuple[str, ...]:
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            if "available_views" not in data.files:
+                return DEFAULT_PREPROCESSED_VIEW_TOKENS
+            return tuple(str(view) for view in data["available_views"].tolist())
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
 
 
 
@@ -127,64 +133,17 @@ def has_simulation_file(
     )
 
 
-
-def detect_available_views(
-    path: Path,
-    dataset_hint: PreprocessedDataset | None = None,
-) -> tuple[str, ...]:
-    dataset = dataset_hint or PreprocessedDataset(
-        product_id="",
-        timestamp="19700101.000000",
-        time_step=0.01,
-        path=path,
-        available_views=(),
-    )
-
-    try:
-        with np.load(path, allow_pickle=False) as data:
-            if "available_views" in data.files:
-                encoded_views = tuple(str(view) for view in data["available_views"].tolist())
-            else:
-                encoded_views = tuple(APP_PLOT_REGISTRY.keys())
-    except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise PreprocessedDataError(f"Failed to inspect {path.name}: {error}") from error
-
-    available_views = tuple(
-        plot_id
-        for plot_id, entry in APP_PLOT_REGISTRY.items()
-        if plot_id in encoded_views and entry.supports_dataset(dataset)
-    )
-
-    if (
-        dataset_hint is not None
-        and any(view_key in APP_PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
-        and has_simulation_file(
-            path.parent,
-            dataset_hint.product_id,
-            dataset_hint.timestamp,
-            dataset_hint.time_step,
-            dataset_hint.time_step_token,
-        )
-    ):
-        available_views = _union_available_views(
-            available_views,
-            tuple(
-                view_key
-                for view_key in SIMULATION_VIEW_KEYS
-                if view_key in APP_PLOT_REGISTRY
-            ),
-        )
-
-    return available_views or ("orderbook",)
-
-
 def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
     views: set[str] = set()
     for view_group in view_groups:
         views.update(view_group)
 
-    ordered_views = [view for view in APP_PLOT_REGISTRY if view in views]
-    ordered_views.extend(sorted(views - set(ordered_views)))
+    ordered_views = [
+        view for view in DEFAULT_PREPROCESSED_VIEW_TOKENS if view in views
+    ]
+    ordered_views.extend(
+        sorted(view for view in views if view not in set(ordered_views))
+    )
     return tuple(ordered_views)
 
 
@@ -228,17 +187,8 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
         )
 
         if preprocessed_match:
-            dataset_hint = PreprocessedDataset(
-                product_id=product_id,
-                timestamp=timestamp,
-                time_step=time_step,
-                path=file_path,
-                available_views=(),
-                time_step_token=time_step_token,
-            )
-
             try:
-                available_views = detect_available_views(file_path, dataset_hint)
+                available_views = _read_dataset_capabilities(file_path)
             except PreprocessedDataError:
                 continue
 
@@ -290,14 +240,7 @@ def discover_preprocessed_datasets(preprocessed_dir: Path) -> list[PreprocessedD
                     path=(
                         orderbook_path if isinstance(orderbook_path, Path) else simulation_path
                     ),
-                    available_views=_union_available_views(
-                        base_views,
-                        tuple(
-                            view_key
-                            for view_key in SIMULATION_VIEW_KEYS
-                            if view_key in APP_PLOT_REGISTRY
-                        ),
-                    ),
+                    available_views=base_views,
                     time_step_token=time_step_token,
                     resolved_time=(
                         simulation_metadata.resolved_time

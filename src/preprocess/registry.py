@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Literal
 
 
 PreprocessBuilder = Callable[[object], dict[str, object]]
+PayloadKind = Literal["orderbook", "trades"]
 
 
 @dataclass(frozen=True)
 class PreprocessPlotSpec:
     key: str
     preprocess_builder: PreprocessBuilder
-    required_payload_keys: tuple[str, ...]
+    payload_kind: PayloadKind
 
 
 def build_orderbook_payload(context: object) -> dict[str, object]:
@@ -38,16 +39,16 @@ PREPROCESS_PLOT_REGISTRY: dict[str, PreprocessPlotSpec] = {
     "orderbook": PreprocessPlotSpec(
         key="orderbook",
         preprocess_builder=build_orderbook_payload,
-        required_payload_keys=("price_axis", "time_axis", "data", "bid", "ask"),
+        payload_kind="orderbook",
     ),
     "trades_scatter": PreprocessPlotSpec(
         key="trades_scatter",
         preprocess_builder=build_trades_scatter_payload,
-        required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
+        payload_kind="trades",
     ),
     "trade_volume_timeline": PreprocessPlotSpec(
         key="trade_volume_timeline",
         preprocess_builder=build_trade_volume_timeline_payload,
-        required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
+        payload_kind="trades",
     ),
 }

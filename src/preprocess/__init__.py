@@ -1,7 +1,6 @@
 from .catalog import (
     PreprocessedDataset,
     RawBatch,
-    detect_available_views,
     discover_preprocessed_datasets,
     discover_raw_batches,
     find_simulation_files,

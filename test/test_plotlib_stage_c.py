@@ -5,14 +5,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import pytest
 
 from src.plotlib import (
     PlotRenderOptions,
+    PreprocessedDataError,
     build_fill_probability_view,
     build_micro_cost_fill_probability_view,
     build_mid_profit_view,
     build_trade_volume_timeline_view,
     build_trades_scatter_view,
+)
+from src.plotlib.loaders import (
     load_orderbook_payload,
     load_simulation_arrays,
     load_trades_payload,
@@ -121,4 +125,55 @@ def test_trades_renderer_accepts_dataframe() -> None:
     trade_frame.attrs["product_id"] = "ETH-USD"
 
     figure = build_trades_scatter_view([trade_frame])
+    assert isinstance(figure, go.Figure)
+
+
+def test_orderbook_loader_reports_missing_keys(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    np.savez(dataset_path, price_axis=np.array([100.0]))
+
+    with pytest.raises(KeyError, match="missing required key"):
+        load_orderbook_payload(
+            dataset_path,
+            product_id="ETH-USD",
+            timestamp="20240101.000000",
+            time_step=0.01,
+        )
+
+
+def test_trades_loader_reports_bad_archive(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    dataset_path.write_text("not an npz archive", encoding="utf-8")
+
+    with pytest.raises(PreprocessedDataError, match="Failed to load trade dataset"):
+        load_trades_payload(
+            dataset_path,
+            product_id="ETH-USD",
+            timestamp="20240101.000000",
+            time_step=0.01,
+        )
+
+
+def test_simulation_loader_reports_missing_keys(tmp_path: Path) -> None:
+    dataset_path = (
+        tmp_path / "ETH-USD-20240101.000000-0.01-simulation-best_size_changed.npz"
+    )
+    np.savez(dataset_path, bid_near_size=np.array([1.0]))
+
+    with pytest.raises(KeyError, match="missing required key"):
+        load_simulation_arrays([dataset_path])
+
+
+def test_trades_renderer_accepts_dataframe_compatibility_path() -> None:
+    trade_frame = pd.DataFrame(
+        {
+            "Time": pd.to_datetime(["2024-01-01T00:00:00"]),
+            "Price": [100.1],
+            "Volume": [1.0],
+            "Side": [-1.0],
+        }
+    )
+    trade_frame.attrs["product_id"] = "ETH-USD"
+
+    figure = build_trade_volume_timeline_view([trade_frame])
     assert isinstance(figure, go.Figure)
