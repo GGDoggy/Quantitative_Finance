@@ -1,56 +1,40 @@
 # `src.plotlib`
 
-`src.plotlib` 是目前 repo 的繪圖核心。它把 preprocessed / simulation `.npz` 轉成型別化 payload，並提供對外穩定的 view-building API。
+`src.plotlib` 是 dashboard 的繪圖層。它不負責 raw discovery 或 preprocess，而是把既有 `.npz` 轉成可渲染的 HoloViews 或 Plotly 物件。
 
-和舊版 `src.plots` 相比，現在的設計更明確分成三層：
+細節請看：
 
-1. `loaders/`
-   - 從檔案讀出 payload 或 simulation arrays
-2. `types.py`
-   - 正規化成 `V1` payload schema
-3. `views.py` / `renderers/`
-   - 建立實際圖表物件
+- [architecture.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/architecture.md)
+- [api.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/api.md)
 
-## 提供的 view
+## 模組分工
 
-- `build_orderbook_view(...)`
-- `build_trades_scatter_view(...)`
-- `build_trade_volume_timeline_view(...)`
-- `build_fill_probability_view(...)`
-- `build_mid_profit_view(...)`
-- `build_micro_profit_view(...)`
-- `build_mid_cost_fill_probability_view(...)`
-- `build_micro_cost_fill_probability_view(...)`
-
-## 輸入資料來源
-
-- orderbook / trades 視圖：
-  - 使用 preprocess 產出的 `.npz`
-- simulation heatmap 視圖：
-  - 使用 simulation 產出的 `.npz`
-
-## 主要模組
-
-- `views.py`
-  - 對外公開的薄 wrapper
+- `orderbook.py`
+  - 讀取 orderbook payload，建構 HoloViews orderbook view
+- `trades.py`
+  - 讀取 trades payload，建構 Plotly trades views
+- `simulation_heatmaps.py`
+  - 讀取 simulation arrays，建構 fill probability / profit / cost-filtered heatmaps
+- `registry.py`
+  - 定義 dashboard 可見 plot types、label、loader、builder 與是否需要 simulation
 - `types.py`
-  - `OrderbookPayloadV1`
-  - `TradesPayloadV1`
-  - `SimulationArraysV1`
+  - 正規化 payload 到 schema version `1`
 - `options.py`
-  - heatmap 軸與顏色範圍設定
-- `loaders/`
-  - orderbook / trades / simulation 載入器
-- `renderers/`
-  - 實際圖表建立邏輯
+  - heatmap 設定與 render options
 
-## schema version
+## 目前支援的圖
 
-`src.plotlib` 目前把所有輸入正規化到 `schema_version == "1"`。
+- `orderbook`
+- `trades_scatter`
+- `trade_volume_timeline`
+- `fill_probability`
+- `mid_profit`
+- `micro_profit`
+- `mid_fill_probability_cost`
+- `micro_fill_probability_cost`
 
-renderers 會依賴這個欄位；若 schema 不符，會丟 `PayloadSchemaVersionError`。
+## 重要設計點
 
-## 相關文件
-
-- [api.md](C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/api.md)
-- [architecture.md](C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/architecture.md)
+- `src.plotlib.registry.APP_PLOT_REGISTRY` 是 dashboard plot 選單的單一來源
+- base dataset 的可畫圖能力由 `dataset.available_views` 決定
+- simulation heatmap 是否可用由 `dataset.simulation_artifact is not None` 決定

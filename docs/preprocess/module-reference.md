@@ -1,92 +1,99 @@
 # Preprocess Module Reference
 
-## `service.py`
+## `src/preprocess/catalog.py`
 
-### `DEFAULT_TIME_STEP`
+這個模組提供 dashboard 偏向的 catalog 與 payload helper。
 
-預設為 `0.01` 秒。
+### 主要函式
 
-### `build_context(batch, time_step)`
+- `format_time_step(...)`
+  - 包裝 `src.dataset_artifacts.format_time_step()`，改丟 `PreprocessValidationError`
+- `detect_available_views(path, view_specs=None)`
+  - 重新推斷 `.npz` 可支援的 views
+- `find_simulation_files(...)`
+  - 依 product / timestamp / time_step / algorithm 等條件找 simulation `.npz`
+- `has_simulation_file(...)`
+  - 判斷某 base dataset 是否已有 simulation artifact
+- `discover_preprocessed_datasets(preprocessed_dir, ...)`
+  - 直接代理到 `discover_preprocessed_artifacts()`
+- `discover_raw_batches(raw_dir, preprocessed_dir)`
+  - 在 raw discovery 上補 `is_preprocessed`
+- `load_preprocessed_payload(dataset)`
+  - 讀 `.npz` 成 `dict[str, object]`，並做 schema validation
 
-載入 `RawBatch` 後建立 `PreprocessContext`。通常給直接 preprocess 用。
+## `src/preprocess/pipeline.py`
 
-### `build_preprocess_context(batch, time_step, loaded_batch=None)`
+這個模組是實際的 preprocess pipeline。
 
-如果你已經有 `LoadedRawBatch`，可以避免重複讀檔。
+### 主要資料結構
 
-### `preprocess_batch(batch, output_dir, time_step=..., builder_registry=None)`
+- `PreprocessContext`
+  - `batch`
+  - `time_step`
+  - `init_rows`
+  - `updates_rows`
+  - `trade_rows`
+- `PreprocessBuilderSpec`
+  - `preprocess_builder`
+  - `required_payload_keys`
 
-執行單一批次 preprocess，回傳 `PreprocessedDataset`。
+### 主要函式
 
-行為要點：
-
-- 依 registry 順序逐一呼叫 builder
-- 若 builder 回傳的 payload 缺少其 `required_payload_keys`，該 view 不會列入輸出
-- 多個 builder 若對同一 key 產出不同內容，會丟 `PreprocessOutputConflictError`
-- 最後以暫存檔寫入 `.npz`，再 replace 成正式輸出
-
-### `preprocess_batches(...)`
-
-逐批次 preprocess，支援 `progress_callback(message)`。
-
-## `registry.py`
-
-### `PreprocessBuilderSpec`
-
-欄位：
-
-- `preprocess_builder`
-- `required_payload_keys`
+- `build_trade_arrays(trade_rows, timestamp)`
+  - 將 raw trades 轉成 numpy arrays
+- `build_trade_payload(context)`
+  - 產生 trades 視圖共用 payload
+- `build_context(batch, time_step)`
+  - 載入 raw batch 並建立 `PreprocessContext`
+- `build_preprocess_context(batch, time_step, loaded_batch=None)`
+  - 允許重用已載入資料
+- `preprocess_batch(batch, output_dir, time_step=DEFAULT_TIME_STEP, builder_registry=None)`
+  - 將單一 batch 寫成 `.npz`
+- `preprocess_batches(batches, output_dir, ...)`
+  - 逐批處理並支援 progress callback
 
 ### `PLOT_REGISTRY`
 
-目前固定註冊：
+目前 registry 如下：
 
-- `orderbook`
-- `trades_scatter`
-- `trade_volume_timeline`
+```python
+{
+    "orderbook": ...,
+    "trades_scatter": ...,
+    "trade_volume_timeline": ...,
+}
+```
 
-## `datasets.py`
+這裡決定兩件事：
 
-### `discover_preprocessed_datasets(preprocessed_dir, ...)`
+- preprocess 會產生哪些 payload
+- dashboard 對 base dataset 可提供哪些 plot 類型
 
-實際轉呼叫 `src.dataset_artifacts.discover_preprocessed_artifacts(...)`。
+## `src/preprocess/orderbook.py`
 
-### `discover_raw_batches(raw_dir, preprocessed_dir)`
+這個模組負責 orderbook payload 的核心建構邏輯。`pipeline.py` 並不實作 orderbook 細節，而是透過：
 
-先掃 raw batches，再對照 preprocessed catalog，把 `RawBatch.is_preprocessed` 標出來。
+```python
+PreprocessBuilderSpec(
+    preprocess_builder=build_orderbook_payload,
+    required_payload_keys=("price_axis", "time_axis", "data", "bid", "ask"),
+)
+```
 
-### `find_simulation_files(...)`
+把它接進 registry。
 
-用 artifact metadata 條件過濾 simulation `.npz`。
+## 例子
 
-### `has_simulation_file(...)`
+```python
+from pathlib import Path
 
-布林版的 `find_simulation_files(...)`。
+from src.preprocess import discover_raw_batches, preprocess_batch
 
-### `load_preprocessed_payload(dataset)`
+raw_dir = Path("data/v3")
+preprocessed_dir = Path("data/preprocessed")
+batches = discover_raw_batches(raw_dir, preprocessed_dir)
 
-讀取 `.npz`、驗證 schema、把 `product_id` / `timestamp` / `time_step` 注入 payload。
-
-如果傳入的是 `DatasetLocator`，可使用其 `payload_cache` 避免重複載入。
-
-## `models.py`
-
-### `PreprocessContext`
-
-builder 的標準輸入物件，包含：
-
-- `batch`
-- `time_step`
-- `init_rows`
-- `updates_rows`
-- `trade_rows`
-
-## `exceptions.py`
-
-- `PreprocessError`
-- `PreprocessValidationError`
-- `PreprocessOutputConflictError`
-- `PreprocessedDataError`
-- `PreprocessedDataFileError`
-- `PreprocessedDataSchemaError`
+dataset = preprocess_batch(batches[0], preprocessed_dir)
+print(dataset.path)
+print(dataset.available_views)
+```

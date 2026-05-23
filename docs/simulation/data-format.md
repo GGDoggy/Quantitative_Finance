@@ -1,22 +1,14 @@
 # Simulation Data Format
 
-本文件描述 `src.simulation` 寫出的 `.npz` 檔案格式，以及 `src.plotlib.loaders.simulation` 對其最低要求。
-
-## 檔名格式
+這份文件描述 simulation `.npz` 的輸出格式，也就是：
 
 ```text
 {product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm_name}.npz
 ```
 
-範例：
-
-```text
-ETH-USD-20240501.120000-0.01-resolved-1-simulation-event_balanced.npz
-```
-
 ## Metadata keys
 
-`save_result_file(...)` 目前會寫入：
+每個 simulation `.npz` 目前至少包含：
 
 - `algorithm`
 - `product_id`
@@ -25,11 +17,9 @@ ETH-USD-20240501.120000-0.01-resolved-1-simulation-event_balanced.npz
 - `base_tick`
 - `resolved_time`
 
-這些 key 定義在 `SIMULATION_METADATA_KEYS`。
+## Array keys
 
-## Result keys
-
-`SimulationResult` 會序列化成以下欄位，順序由 `SIMULATION_RESULT_KEYS` 定義：
+目前 `save_result_file()` 會依 `SIMULATION_RESULT_KEYS` 寫出以下欄位：
 
 - `bid_prices`
 - `bid_near_size`
@@ -58,9 +48,9 @@ ETH-USD-20240501.120000-0.01-resolved-1-simulation-event_balanced.npz
 - `ask_mid_profit`
 - `ask_micro_profit`
 
-## Plotlib 最低需求
+## 給 `src.plotlib` 的最低需求
 
-`src.plotlib.loaders.simulation.load_simulation_arrays(...)` 並不要求讀取全部 simulation result keys，它目前只依賴：
+`src.plotlib.simulation_heatmaps.load_simulation_arrays()` 目前只要求這些欄位一定存在：
 
 - `bid_near_size`
 - `bid_opp_size`
@@ -73,11 +63,16 @@ ETH-USD-20240501.120000-0.01-resolved-1-simulation-event_balanced.npz
 - `ask_micro_profit`
 - `ask_result`
 
-換句話說：
+這表示：
 
-- `.npz` 可以包含更多 simulation 結果欄位
-- 但如果缺少上面十個 key，heatmap loader 會失敗
+- 若未來新增 simulation 指標，heatmap 層不一定要立刻改
+- 但若更名或刪除上面十個欄位，dashboard simulation plots 會直接壞掉
 
-## 多檔合併
+## `result` 的語意
 
-`load_simulation_arrays(paths)` 支援一次讀多個 simulation 檔，並對每個 required key 做 `np.concatenate(...)`。這讓 GUI 可以把同一組條件下的多個 artifact 合併成一份 heatmap 輸入。
+程式中目前把 unresolved order 視為 `-1`。在 heatmap builder：
+
+- fill probability 圖只會統計 `result != -1` 的樣本
+- profit 圖只會統計 `result == 1` 的樣本
+
+這是目前 dashboard 對 simulation 結果的核心假設。

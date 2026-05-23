@@ -1,75 +1,114 @@
 # Quantitative Finance Project
 
-Coinbase market-data collection, visualization, and simulation experiments.
+This repository is a quantitative finance research project built around Coinbase market data. The current mainline workflow is no longer a collection of standalone scripts. It is organized into four connected stages:
 
+1. `server/websocket.py`
+   Subscribes to `heartbeats`, `level2`, and `market_trades`, and writes raw CSV batches in the `data/v3` format.
+2. `src/preprocess`
+   Converts raw `data/v3` batches into preprocessed `.npz` files that the dashboard can read directly.
+3. `src/simulation`
+   Runs virtual order simulations on raw batches and writes simulation `.npz` artifacts.
+4. `gui/webUI.py`
+   Starts the Panel dashboard and ties together catalog discovery, preprocessing, simulation, and interactive plots.
 
-## Main Components
+## Current Pipeline
 
-- `server/websocket.py`
-  - Subscribes to `heartbeats`, `level2`, and `market_trades`.
-  - Checks `sequence_num` and heartbeat continuity.
-  - Writes `level2-*.csv` and `trade-*.csv` in the current working directory.
+```text
+data/v3/*.csv
+  -> src.raw_batches
+  -> src.preprocess
+  -> data/preprocessed/*-orderbook_for_plot.npz
+  -> src.plotlib
+  -> gui/webUI.py
+
+data/v3/*.csv
+  -> src.raw_batches
+  -> src.simulation
+  -> data/preprocessed/*-simulation-*.npz
+  -> src.dataset_artifacts
+  -> src.plotlib
+  -> gui/webUI.py
+```
+
+## Project Layout
+
+- `server/`
+  - `websocket.py`: Coinbase websocket collector. Validates `sequence_num` and heartbeat continuity.
 - `gui/`
-  - Panel dashboard package split by responsibility: app bootstrap, dashboard composition, catalog logic, rendering, layout, simulation controls, and event handlers.
-  - Supports `Orderbook`, `Trades Scatter`, `Trade Volume Timeline`, and `Fill Probability`.
-- `webUI.py`
-  - Primary dashboard entry point that serves the refactored `gui` package.
+  - `webUI.py`: Dashboard startup entrypoint.
+  - `dashboard.py`: Main dashboard implementation, including catalog refresh, preprocessing, simulation, plot controls, and settings persistence.
+  - `styles.py`: Dashboard styling and UI constants.
+  - `dashboard_settings.json`: Stored simulation heatmap settings.
+- `src/raw_batches/`
+  - Raw CSV filename parsing, batch discovery, and loading.
 - `src/preprocess/`
-  - Shared non-UI preprocessing and dataset catalog logic.
-- `src/plots/`
-  - Non-UI plot builders and plot registry definitions.
+  - Raw batch to preprocessed `.npz` pipeline and dashboard-facing catalog helpers.
+- `src/dataset_artifacts/`
+  - Preprocessed and simulation artifact naming, parsing, catalog discovery, and view detection.
 - `src/simulation/`
-  - Fill-probability simulation library module for loading raw datasets and running batch simulations.
+  - Virtual order simulation library, algorithm registry, parallel execution, and simulation output writing.
+- `src/plotlib/`
+  - Loaders, builders, and registry for orderbook, trades, and simulation heatmap plots.
+- `data/`
+  - `v1/`, `v2/`: Legacy formats.
+  - `v3/`: Current raw CSV batch format.
+  - `preprocessed/`: Base datasets and simulation artifacts.
+- `docs/`
+  - Module documentation, contracts, and API notes for the current architecture.
 - `test/`
-  - Small plotting and library-level validation helpers.
+  - Library-level tests, refactor tests, and dashboard smoke tests.
 
-## Notes
+## Installation
 
-- `server/websocket.py` only supports one product at a time.
-- Timestamps in generated filenames are UTC.
-- `webUI.py` serves the local Panel app with `show=True`.
-- No standalone preprocess CLI entry point is currently provided.
-
-
-## Simulation Module
-
-`src.simulation` is a library-only module. It does not provide CLI wrappers,
-interactive entrypoints, or GUI adapters.
-
-- Public entry points:
-  - `RawSimulationDataset`
-  - `LoadedMarketData`
-  - `SimulationRequest`
-  - `SimulationResult`
-  - `SimulationJobResult`
-  - `list_algorithms()`
-  - `load_raw_dataset()`
-  - `simulate_loaded_data()`
-  - `simulate_batch()`
-  - `simulate_batches()`
-- Internal implementation modules:
-  - `models.py`: typed request/result containers
-  - `registry.py`: algorithm lookup
-  - `io.py`: raw CSV discovery/loading and `.npz` serialization
-  - `runner.py`: orchestration and parallel execution
-
-Recommended setup for repo-local imports:
+Create a virtual environment if you want one, then install dependencies:
 
 ```bash
-pip install -e .
+pip install -r requirements.txt
 ```
 
-Example preferred usage:
+Current dependencies in `requirements.txt`:
 
-```python
-from src.simulation import SimulationRequest, list_algorithms, simulate_batch
+- `aiocsv`
+- `aiofiles`
+- `bokeh`
+- `coinbase_advanced_py==1.8.2`
+- `datashader`
+- `holoviews`
+- `matplotlib==3.10.8`
+- `numpy`
+- `pandas`
+- `panel`
+- `plotly`
+
+## Running The Dashboard
+
+Start the dashboard from the repository root:
+
+```bash
+python gui/webUI.py
 ```
 
-## Data Layout
+`gui/webUI.py` currently:
 
-### v1
+- uses `data/v3` as the default raw data directory
+- uses `data/preprocessed` as the default artifact directory
+- starts a local Panel app with `pn.serve(..., show=True)`
 
-Snapshot-only JSON format. One file can contain multiple products.
+## Raw Data Collection
+
+Based on the current collector behavior, `server/websocket.py` should be run with `server/` as the working directory. It writes output files to the current working directory instead of automatically placing them under `data/`.
+
+Important constraints:
+
+- only one `product_id` is supported at a time
+- generated filename timestamps are UTC
+- the execution directory determines where `level2-*.csv` and `trade-*.csv` are written
+
+## Data Formats
+
+### `v1`
+
+Legacy snapshot-only JSON. A single file can contain multiple products.
 
 ```json
 {
@@ -80,9 +119,9 @@ Snapshot-only JSON format. One file can contain multiple products.
 }
 ```
 
-### v2
+### `v2`
 
-JSON event format for multiple products.
+Legacy multi-product JSON event format.
 
 `level2`:
 
@@ -113,69 +152,123 @@ JSON event format for multiple products.
 }
 ```
 
-### v3
+### `v3`
 
-Single-product CSV format used by the current pipeline.
+The current mainline raw format is a single-product CSV batch format.
 
-Level 2 batch:
+Level 2 batch files:
 
 - `level2-PRODUCT_ID-init-yyyymmdd.hhmmss.csv`
 - `level2-PRODUCT_ID-updates-yyyymmdd.hhmmss.csv`
 
-Trade batch:
+Trade batch files:
 
 - `trade-PRODUCT_ID-yyyymmdd.hhmmss.csv`
 
-`init` columns:
+Columns:
+
+- `init`
 
 | Price | Volume | Side |
 | - | - | - |
 
-`updates` columns:
+- `updates`
 
 | Time | Price | Volume | Side |
 | - | - | - | - |
 
-`trade` columns:
+- `trade`
 
 | Time | Price | Volume | Side |
 | - | - | - | - |
 
-- In `level2`, `Side` is `-1` for sell and `+1` for buy.
-- In `trade`, `Side` is `-1` for sell maker and `+1` for buy maker.
-- `Time` is measured in seconds from midnight of the filename date.
+Notes:
 
-## Preprocess API Boundaries
+- in `level2`, `Side` is `-1` for sell and `+1` for buy
+- in `trade`, `Side` is currently treated by the dashboard as the taker side using `-1.0` and `1.0`
+- `Time` is measured in seconds from midnight of the date encoded in the filename
 
-`src.preprocess` now has an explicit package-level **public API** for stable imports.
+## Public APIs
 
-### Stable public API (import from `src.preprocess`)
+### `src.raw_batches`
 
-- Models: `RawBatch`, `PreprocessedDataset`, `PlotDatasetLocator`, `PreprocessContext`
-- Catalog: `discover_raw_batches`, `discover_preprocessed_datasets`, `find_simulation_files`, `has_simulation_file`
-- Filenames: `format_time_step`, `parse_timestamp`
-- I/O and services: `load_preprocessed_payload`, `DEFAULT_TIME_STEP`, `preprocess_batch`, `preprocess_batches`
-- Exceptions: `PreprocessError`, `PreprocessValidationError`, `PreprocessOutputConflictError`, `PreprocessedDataError`, `PreprocessedDataFileError`, `PreprocessedDataSchemaError`
+- `discover_raw_batches(raw_dir)`
+- `load_raw_batch(batch)`
+- `parse_raw_filename(filename)`
+- `parse_timestamp(timestamp)`
+- `file_time_to_unix(file_time)`
 
-### Internal modules (import explicitly, no stability guarantee)
+### `src.preprocess`
 
-- `src.preprocess.models`: preprocess domain models and context types
-- `src.preprocess.filenames`: raw/preprocessed/simulation filename parsing and token helpers
-- `src.preprocess.io`: CSV/NPZ I/O, schema validation, and preprocess context construction
-- `src.preprocess.catalog`: dataset discovery, aggregation, and simulation-file matching
-- `src.preprocess.service`: preprocess orchestration over the builder registry
-- `src.preprocess.common`: internal transitional re-export facade only
-- `src.preprocess.orderbook`, `src.preprocess.trades_scatter`, `src.preprocess.trade_volume_timeline`: plot-specific preprocess builders
-- `src.preprocess.adapters`: internal adapters such as registry-backed view detection
+- `discover_raw_batches(raw_dir, preprocessed_dir)`
+- `discover_preprocessed_datasets(preprocessed_dir, ...)`
+- `load_preprocessed_payload(dataset)`
+- `find_simulation_files(...)`
+- `has_simulation_file(...)`
+- `format_time_step(...)`
+- `DEFAULT_TIME_STEP`
+- `PLOT_REGISTRY`
+- `preprocess_batch(...)`
+- `preprocess_batches(...)`
 
-### Migration and deprecation rule
+### `src.dataset_artifacts`
 
-- New code should prefer the stable package-level API above.
-- GUI, simulation orchestration, dashboard code, and API-surface tests should import stable names from `src.preprocess` unless they explicitly need an internal helper.
-- Internal preprocess modules may import shared types from `src.preprocess.models`.
-- Do not add new external imports from `src.preprocess.catalog.RawBatch`, `src.preprocess.catalog.PreprocessedDataset`, `src.preprocess.catalog.PlotDatasetLocator`, or `src.preprocess.common.PreprocessContext`; those paths remain only as compatibility aliases.
-- If a caller needs an internal helper, import from the concrete internal module directly and treat it as refactorable.
+- `build_preprocessed_output_path(...)`
+- `build_simulation_output_path(...)`
+- `parse_preprocessed_filename(...)`
+- `parse_simulation_filename(...)`
+- `discover_preprocessed_artifacts(...)`
+- `discover_simulation_artifacts(...)`
+- `detect_available_views(...)`
 
-### Test command
+### `src.simulation`
 
-- PowerShell: ``$env:PYTHONPATH='.'; pytest test/test_preprocess_public_api.py test/test_preprocess_models_api.py test/test_preprocess_filenames.py test/test_preprocess_io.py test/test_preprocess_catalog_simulation_matching.py test/test_preprocess_catalog_view_detector.py test/test_preprocess_service_registry.py test/test_preprocess_discovery.py``
+- `list_algorithms()`
+- `load_raw_dataset(dataset)`
+- `simulate_loaded_data(data, request)`
+- `simulate_batch(dataset, request, output_dir)`
+- `simulate_batches(datasets, request, output_dir)`
+- `build_output_path(...)`
+
+### `src.plotlib`
+
+- `get_dataset_plot_types(dataset)`
+- `get_product_plot_types(datasets)`
+- `supports_plot_type(dataset, plot_type)`
+- `load_plot_input(plot_type, datasets)`
+- orderbook, trades, and simulation heatmap builders
+
+## Simulation Algorithms
+
+Currently registered algorithms:
+
+- `time_averaged_random_cancellation`
+- `event_balanced`
+- `best_size_changed`
+
+Simulation outputs are currently written to:
+
+```text
+data/preprocessed/{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm}.npz
+```
+
+## Important Notes
+
+- `server/websocket.py` currently supports only one product at a time.
+- `data/preprocessed/` currently mixes two output categories:
+  - `*-orderbook_for_plot.npz`
+  - `*-simulation-*.npz`
+- base plot availability in the dashboard is driven by the `available_views` field in the preprocessed dataset
+- simulation heatmap availability is driven by whether a matching simulation artifact exists
+- if you change naming rules or payload keys, update the corresponding files in `docs/` as well
+
+## Documentation
+
+Current module documentation lives under `docs/`:
+
+- [docs/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/README.md)
+- [docs/raw_batches/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/raw_batches/README.md)
+- [docs/preprocess/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/preprocess/README.md)
+- [docs/dataset_artifacts/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/dataset_artifacts/README.md)
+- [docs/simulation/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/simulation/README.md)
+- [docs/plotlib/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/README.md)

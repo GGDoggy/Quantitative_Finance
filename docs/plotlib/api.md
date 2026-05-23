@@ -1,149 +1,74 @@
 # Plotlib API
 
-## Public imports
+## Public exports
 
-`src.plotlib.__init__` 目前對外暴露三類 API：
+`src.plotlib.__init__` 目前對外提供四類能力：
 
-- view builders
-- payload / options 型別
-- error types
+### 1. Plot registry
 
-## View builders
+- `APP_PLOT_LABELS`
+- `APP_PLOT_REGISTRY`
+- `DashboardPlotSpec`
+- `get_dataset_plot_types(dataset)`
+- `get_product_plot_types(datasets)`
+- `supports_plot_type(dataset, plot_type)`
+- `load_plot_input(plot_type, datasets)`
 
-### `build_orderbook_view(payloads, render_options=None)`
+### 2. Orderbook plots
 
-輸入 `list[OrderbookPayloadV1]`，建立 orderbook 視圖。
+- `load_orderbook_payload(path, *, product_id, timestamp, time_step)`
+- `load_orderbook_payloads(datasets)`
+- `build_orderbook_view(payloads, render_options=None)`
 
-### `build_trades_scatter_view(trade_frames_or_payloads, render_options=None)`
+### 3. Trades plots
 
-輸入可為：
+- `load_trades_payload(path, *, product_id, timestamp, time_step)`
+- `load_trades_payloads(datasets)`
+- `build_trades_scatter_view(payloads_or_frames, render_options=None)`
+- `build_trade_volume_timeline_view(payloads_or_frames, render_options=None)`
 
-- `Sequence[TradesPayloadV1]`
-- 含 `Time`, `Price`, `Volume`, `Side` 欄位的 `pandas.DataFrame`
+### 4. Simulation heatmaps
 
-### `build_trade_volume_timeline_view(trade_frames_or_payloads, render_options=None)`
+- `load_simulation_arrays(paths)`
+- `load_simulation_arrays_from_metadata(simulation_paths)`
+- `build_fill_probability_view(simulation_arrays, render_options=None)`
+- `build_mid_profit_view(simulation_arrays, render_options=None)`
+- `build_micro_profit_view(simulation_arrays, render_options=None)`
+- `build_mid_cost_fill_probability_view(simulation_arrays, render_options=None)`
+- `build_micro_cost_fill_probability_view(simulation_arrays, render_options=None)`
 
-輸入型別與 `build_trades_scatter_view(...)` 相同。
+## Plot type 與資料需求
 
-### `build_fill_probability_view(simulation_arrays, render_options=None)`
+| Plot type | Base data | Simulation data |
+| --- | --- | --- |
+| `orderbook` | 需要 | 不需要 |
+| `trades_scatter` | 需要 | 不需要 |
+| `trade_volume_timeline` | 需要 | 不需要 |
+| `fill_probability` | 不需要 | 需要 |
+| `mid_profit` | 不需要 | 需要 |
+| `micro_profit` | 不需要 | 需要 |
+| `mid_fill_probability_cost` | 不需要 | 需要 |
+| `micro_fill_probability_cost` | 不需要 | 需要 |
 
-輸入 `SimulationArraysV1`。
+## 主要錯誤類型
 
-### `build_mid_profit_view(simulation_arrays, render_options=None)`
+- `PayloadSchemaVersionError`
+  - payload schema version 不是 builder 預期值
+- `PreprocessedDataError`
+  - 載入 `.npz` 失敗或缺必要欄位
+- `FileNotFoundError`
+  - 指定 dataset 路徑不存在
 
-輸入 `SimulationArraysV1`。
+## 例子
 
-### `build_micro_profit_view(simulation_arrays, render_options=None)`
+```python
+from src.plotlib import build_trades_scatter_view, load_trades_payload
 
-輸入 `SimulationArraysV1`。
-
-### `build_mid_cost_fill_probability_view(simulation_arrays, render_options=None)`
-
-輸入 `SimulationArraysV1`，並使用 `render_options.cost`。
-
-### `build_micro_cost_fill_probability_view(simulation_arrays, render_options=None)`
-
-輸入 `SimulationArraysV1`，並使用 `render_options.cost`。
-
-## Loaders
-
-### `load_orderbook_payload(path, product_id, timestamp, time_step)`
-
-要求 `.npz` 至少包含：
-
-- `price_axis`
-- `time_axis`
-- `data`
-- `bid`
-- `ask`
-
-可選：
-
-- `mid`
-
-### `load_trades_payload(path, product_id, timestamp, time_step)`
-
-要求 `.npz` 包含：
-
-- `trade_time`
-- `trade_price`
-- `trade_volume`
-- `trade_side`
-
-### `load_simulation_arrays(paths)`
-
-可一次讀多個 simulation artifact，再串接成單一 `SimulationArraysV1`。
-
-要求每個 `.npz` 都包含：
-
-- `bid_near_size`
-- `bid_opp_size`
-- `bid_mid_profit`
-- `bid_micro_profit`
-- `bid_result`
-- `ask_near_size`
-- `ask_opp_size`
-- `ask_mid_profit`
-- `ask_micro_profit`
-- `ask_result`
-
-## 型別
-
-### `OrderbookPayloadV1`
-
-至少包含：
-
-- `schema_version`
-- `product_id`
-- `timestamp`
-- `time_step`
-- `price_axis`
-- `time_axis`
-- `data`
-- `bid`
-- `ask`
-- `mid`
-
-### `TradesPayloadV1`
-
-- `schema_version`
-- `product_id`
-- `timestamp`
-- `time_step`
-- `trade_time`
-- `trade_price`
-- `trade_volume`
-- `trade_side`
-
-### `SimulationArraysV1`
-
-- `schema_version`
-- `bid_near_size`
-- `bid_opp_size`
-- `bid_result`
-- `ask_near_size`
-- `ask_opp_size`
-- `ask_result`
-- `bid_mid_profit`
-- `ask_mid_profit`
-- `bid_micro_profit`
-- `ask_micro_profit`
-
-## Render options
-
-### `PlotRenderOptions`
-
-欄位：
-
-- `cost`
-- `simulation_heatmap_settings`
-
-### `DashboardSimulationHeatmapSettings`
-
-分成三組設定：
-
-- `fill_probability`
-- `profit`
-- `conditional_fill_probability`
-
-它支援 `to_dict()` / `from_dict(...)`，供 GUI 設定檔序列化使用。
+payload = load_trades_payload(
+    "data/preprocessed/ETH-USD-20240501.120000-0.01-orderbook_for_plot.npz",
+    product_id="ETH-USD",
+    timestamp="20240501.120000",
+    time_step=0.01,
+)
+figure = build_trades_scatter_view([payload])
+```

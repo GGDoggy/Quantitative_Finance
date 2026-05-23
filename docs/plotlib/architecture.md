@@ -1,73 +1,82 @@
 # Plotlib Architecture
 
-## 分層
+## 高層流程
 
-### 1. Loader layer
+```text
+PreprocessedArtifact
+  -> src.plotlib.registry.load_plot_input()
+  -> loader
+  -> normalized payload / simulation arrays
+  -> builder
+  -> HoloViews object or Plotly Figure
+  -> gui.dashboard render
+```
 
-負責把 `.npz` 讀成乾淨的 Python / NumPy payload：
+## `registry.py`
 
-- `loaders/orderbook.py`
-- `loaders/trades.py`
-- `loaders/simulation.py`
+`APP_PLOT_REGISTRY` 中每一項 `DashboardPlotSpec` 都定義：
 
-這一層負責：
+- `plot_type`
+- `label`
+- `loader`
+- `builder`
+- `required_payload_keys`
+- `requires_simulation`
 
-- 檢查必要 keys 是否存在
-- 必要時做 dtype / datetime 轉換
-- 呼叫 `normalize_*_to_v1(...)`
+這讓 dashboard 不需要知道各 plot 的實作細節，只需要：
 
-### 2. Type normalization layer
+1. 依 dataset 找出可支援的 plot types
+2. 依 plot type 載入對應輸入
+3. 呼叫 builder 產生圖
 
-`types.py` 把不同來源的 dict 正規化成明確的 `V1` schema，並補齊必要欄位，例如：
+## Base dataset 路徑
 
-- 補 `schema_version = "1"`
-- orderbook 若沒有 `mid`，自動用 `0.5 * (bid + ask)` 補上
+### Orderbook
 
-### 3. View API layer
+- loader: `load_orderbook_payloads(...)`
+- builder: `build_orderbook_view(...)`
+- 資料來源: preprocessed `.npz`
 
-`views.py` 提供穩定入口，避免呼叫端直接依賴 renderer 細節。
+### Trades
 
-### 4. Renderer layer
+- loader: `load_trades_payloads(...)`
+- builder: `build_trades_scatter_view(...)` 或 `build_trade_volume_timeline_view(...)`
+- 資料來源: 同一份 preprocessed `.npz`
 
-`renderers/` 內放實際繪圖邏輯：
+## Simulation heatmap 路徑
 
-- `orderbook.py`
-- `trades_scatter.py`
-- `trade_volume_timeline.py`
-- `fill_probability.py`
-- `profit_heatmap.py`
-- `cost_fill_probability.py`
-- `simulation_common.py`
-- `trades_common.py`
+### Fill / profit / cost-filtered plots
 
-## 交易視圖限制
+- loader: `load_simulation_arrays_from_metadata(...)`
+- builder:
+  - `build_fill_probability_view(...)`
+  - `build_mid_profit_view(...)`
+  - `build_micro_profit_view(...)`
+  - `build_mid_cost_fill_probability_view(...)`
+  - `build_micro_cost_fill_probability_view(...)`
+- 資料來源: simulation `.npz`
 
-`renderers/trades_common.py` 會把多個 trade payload 合併成單一 DataFrame，但要求：
+## Payload normalization
 
-- 每筆資料都帶有 `product_id`
-- 所有 payload 必須來自同一個 `product_id`
-- 資料不能是空的
+`types.py` 內的 normalization helper 會把 loader 輸出的資料正規化成 schema version `1`。builder 在接收 payload 前，預期資料已經是 version `1`。
 
-這代表目前 trade 類 view 不支援跨商品聚合。
+這樣的好處是：
 
-## Simulation heatmap 共用邏輯
+- loader 負責處理舊資料或格式差異
+- builder 只專注於視覺化
+- schema 升級時有單一轉換入口
 
-`renderers/simulation_common.py` 提供：
+## Dashboard 端的使用方式
 
-- bin edge / center 計算
-- heatmap trace 建立
-- sample count 共用 color 上限
-- 正方形 heatmap 軸設定
+`gui/dashboard.py` 主要使用這幾個函式：
 
-目前預設 `RESOLVED_ONLY = True`，顯示邏輯以 resolved outcome 為主。
+- `get_dataset_plot_types(dataset)`
+- `get_product_plot_types(datasets)`
+- `supports_plot_type(dataset, plot_type)`
+- `load_plot_input(plot_type, datasets)`
 
-## 與上游 / 下游的關係
+這代表 dashboard 與 plot 實作是鬆耦合的；新增圖表通常只要補：
 
-上游：
-
-- `src.preprocess` 提供 orderbook/trade `.npz`
-- `src.simulation` 提供 simulation `.npz`
-
-下游：
-
-- GUI dashboard 或其他應用層負責選 dataset、呼叫 loader / view builder、把結果放到 Panel 或 Plotly 容器內
+- `src/plotlib/registry.py`
+- 對應 loader / builder
+- 必要時補 `src/preprocess/pipeline.py` 或 simulation 輸出支援

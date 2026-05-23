@@ -1,5 +1,24 @@
 # Simulation API
 
+## Public exports
+
+### 函式
+
+- `list_algorithms() -> list[str]`
+- `build_output_path(output_path, product_id, timestamp, time_step, algorithm_name, resolved_time) -> Path`
+- `parse_dataset_groups(data_v3_path) -> list[RawBatch]`
+- `load_raw_dataset(dataset: RawBatch) -> LoadedMarketData`
+- `simulate_loaded_data(data: LoadedMarketData, request: SimulationRequest) -> SimulationResult`
+- `simulate_batch(dataset: RawBatch, request: SimulationRequest, output_dir) -> SimulationJobResult`
+- `simulate_batches(datasets: list[RawBatch], request: SimulationRequest, output_dir) -> list[SimulationJobResult]`
+
+### 資料模型
+
+- `LoadedMarketData`
+- `SimulationRequest`
+- `SimulationResult`
+- `SimulationJobResult`
+
 ## `SimulationRequest`
 
 欄位：
@@ -9,67 +28,64 @@
 - `base_tick`
 - `resolved_time`
 
-建構時會驗證：
+驗證規則：
 
 - `algorithm` 不可為空
 - `time_step` 必須是正的有限值
 - `base_tick` 必須是正的有限值
 - `resolved_time` 必須是非負有限值
 
-## `simulate_loaded_data(data, request)`
+## `SimulationResult`
 
-最底層的執行入口。它：
+這個 model 封裝演算法輸出的所有 numpy arrays。主要欄位分成 bid / ask 兩側：
 
-1. 從 registry 取出演算法
-2. 呼叫演算法函式
-3. 把 tuple 輸出包成 `SimulationResult`
+- size 與價格
+  - `bid_prices`, `ask_prices`
+  - `bid_near_size`, `ask_near_size`
+  - `bid_opp_size`, `ask_opp_size`
+  - `bid_spread`, `ask_spread`
+- queue 狀態
+  - `bid_ahead`, `ask_ahead`
+  - `bid_behind`, `ask_behind`
+  - `bid_vorder_ratio`, `ask_vorder_ratio`
+  - `bid_survival_time`, `ask_survival_time`
+- fill 結果
+  - `bid_result`, `ask_result`
+- profit
+  - `bid_mid_profit`, `ask_mid_profit`
+  - `bid_micro_profit`, `ask_micro_profit`
+  - `bid_mid_price`, `ask_mid_price`
+  - `bid_micro_price`, `ask_micro_price`
 
-適合測試或已自行處理 raw loading 的情境。
-
-## `simulate_batch(dataset, request, output_dir)`
-
-完整單批次流程：
-
-1. 根據 request 計算輸出檔名
-2. 載入 `RawBatch`
-3. 執行 simulation
-4. 寫出 `.npz`
-5. 回傳 `SimulationJobResult`
-
-`SimulationJobResult` 欄位：
+## `SimulationJobResult`
 
 - `dataset`
 - `output_path`
 - `overwritten`
 
-其中 `overwritten` 表示正式輸出路徑在本次寫入前是否已存在。
+`overwritten` 可讓 UI 知道這次寫檔是否覆蓋了既有 simulation artifact。
 
-## `simulate_batches(datasets, request, output_dir)`
+## 例子
 
-如果 `len(datasets) <= 1`，直接逐筆呼叫 `simulate_batch(...)`。
+```python
+from pathlib import Path
 
-如果資料筆數大於 1，則：
+from src.raw_batches import discover_raw_batches
+from src.simulation import (
+    DEFAULT_BASE_TICK,
+    DEFAULT_RESOLVED_TIME,
+    DEFAULT_TIME_STEP,
+    SimulationRequest,
+    simulate_batch,
+)
 
-- 丟給 process pool 平行跑
-- 各 worker 回傳 `SimulationWorkerPayload`
-- 主程序再轉回 `SimulationJobResult`
-- 最後依輸入 dataset 順序重新排序
-
-如果任何 worker 失敗，會丟出 `RuntimeError("Batch processing failed for: ...")`。
-
-## `list_algorithms()`
-
-回傳當前 registry 已註冊的演算法名稱。
-
-## `load_raw_dataset(dataset)`
-
-把 `RawBatch` 轉成 `LoadedMarketData`：
-
-- `init`
-- `updates`
-- `trades`
-- `start_time`
-
-## `build_output_path(...)`
-
-定義 simulation artifact 路徑，實際委派給 `src.dataset_artifacts.build_simulation_output_path(...)`。
+batches = discover_raw_batches(Path("data/v3"))
+request = SimulationRequest(
+    algorithm="event_balanced",
+    time_step=DEFAULT_TIME_STEP,
+    base_tick=DEFAULT_BASE_TICK,
+    resolved_time=DEFAULT_RESOLVED_TIME,
+)
+result = simulate_batch(batches[0], request, Path("data/preprocessed"))
+print(result.output_path)
+```

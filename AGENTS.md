@@ -1,70 +1,161 @@
-# 專案摘要
+# Operational Constraints
 
-這是一個以 Coinbase 市場資料為來源的量化金融研究專案，現在的 repo 已經從單純的收資料與畫圖腳本，演進成「資料收集 + 預處理 catalog + 互動式儀表板 + simulation」的組合。主要流程如下:
+Do not perform bulk deletion of files or directories.
 
-1. `server/websocket.py` 長時間訂閱 websocket，收集 `heartbeats`、`level2` 與 `market_trades`，輸出 `data/v3` 管線使用的 CSV 批次格式。
-2. `src/preprocess/` 掃描原始批次、辨識可用資料集、把 `data/v3` 的 CSV 轉成 `data/preprocessed/*.npz`。
-3. `src/simulation/` 針對原始批次執行掛單 fill probability / profit 相關 simulation，輸出 simulation `.npz`。
-4. `gui/plot.py` 啟動 Panel dashboard，整合資料選擇、raw batch preprocessing、simulation 與互動式視覺化。
+Do not use:
 
-`README.md` 仍保留 `data/v1`、`data/v2`、`data/v3` 三種資料格式說明，但目前主線流程是 `v3 CSV -> preprocessed npz / simulation npz -> dashboard plots`。
+- `del /s`
+- `rd /s`
+- `rmdir /s`
+- `Remove-Item -Recurse`
+- `rm -rf`
 
-# 目錄結構
+When deleting a file, you may delete only one explicit file path at a time.
+
+Correct example:
+
+```powershell
+Remove-Item "C:\path\to\file.txt"
+```
+
+If bulk deletion is required, stop and ask the user to delete the files manually.
+
+The following directory name is exempt from the rule above and may be deleted directly. The task must still confirm whether it was actually deleted:
+
+- `__pycache__/`
+
+---
+
+# project-doc
+
+## Project Summary
+
+This repository is a quantitative finance research project built around Coinbase market data. The current mainline architecture is organized as follows:
+
+1. `server/websocket.py`
+   Runs a long-lived websocket subscription for `heartbeats`, `level2`, and `market_trades`, and writes raw CSV batches in the `data/v3` style.
+2. `src/raw_batches/`
+   Handles raw CSV filename parsing, batch discovery, and loading.
+3. `src/preprocess/`
+   Converts `data/v3` raw batches into preprocessed `.npz` files that the dashboard can consume.
+4. `src/simulation/`
+   Runs virtual order simulations on raw batches and writes simulation `.npz` artifacts.
+5. `src/dataset_artifacts/`
+   Scans `data/preprocessed` and builds the preprocessed and simulation artifact catalog.
+6. `src/plotlib/`
+   Converts preprocessed payloads or simulation arrays into HoloViews and Plotly visualizations.
+7. `gui/webUI.py`
+   Starts the Panel dashboard and integrates catalog discovery, preprocessing, simulation, and interactive visualization.
+
+The current mainline data flow is:
+
+```text
+data/v3 CSV
+  -> src.raw_batches
+  -> src.preprocess
+  -> data/preprocessed/*-orderbook_for_plot.npz
+  -> src.plotlib
+  -> gui/webUI.py
+
+data/v3 CSV
+  -> src.raw_batches
+  -> src.simulation
+  -> data/preprocessed/*-simulation-*.npz
+  -> src.dataset_artifacts
+  -> src.plotlib
+  -> gui/webUI.py
+```
+
+## Directory Structure
 
 - `server/`
-  - `websocket.py`: 主資料收集腳本。會驗證 `sequence_num` 與 heartbeat 連續性，若異常就重啟訂閱。
-  - `config.json`: 目前設定 `saving_interval=300` 秒，且只支援單一 `product_id`，預設是 `ETH-USD`。
+  - `websocket.py`: Main data collection script. Validates `sequence_num` and heartbeat continuity and recreates the subscription when needed.
+  - `config.json`: Collector settings, including `saving_interval` and a single `product_id`.
 - `gui/`
-  - `plot.py`: 目前唯一的 GUI 入口。提供產品/資料集選擇、raw data 目錄切換、preprocess、simulation 與 plot rendering。
-  - `dashboard_settings.json`: 儀表板設定檔；若存在，會保存 simulation heatmap 相關參數。
+  - `webUI.py`: Dashboard startup entrypoint that serves the Panel app.
+  - `dashboard.py`: Main UI implementation, including product selection, catalog refresh, preprocessing, simulation, plot rendering, and settings persistence.
+  - `styles.py`: Dashboard styling and UI constants.
+  - `dashboard_settings.json`: Persisted simulation heatmap settings.
+- `src/raw_batches/`
+  - `api.py`: Raw CSV filename parsing, batch discovery, and CSV loading.
+  - `__init__.py`: Public exports for the raw batch API.
 - `src/preprocess/`
-  - `catalog.py`: 掃描 `data/v3` CSV 與 `data/preprocessed` 的 `.npz`，建立 raw batch 與 preprocessed dataset catalog。
-  - `service.py`: 執行 preprocess，將單一 raw batch 輸出成 dashboard 可讀取的 `.npz`。
-  - `orderbook.py`、`trades_scatter.py`、`trade_volume_timeline.py`: 各 plot 類型對應的 preprocess payload builder。
-- `src/plots/`
-  - `registry.py`: plot registry，目前已註冊 `Orderbook`、`Trades Scatter`、`Trade Volume Timeline`、`Fill Probability`、`Mid Profit`、`Micro Profit` 與兩種 cost-filtered fill probability heatmap。
-  - 其他模組負責實際 plot 建構，混合使用 `holoviews`/`datashader` 與 `plotly`。
+  - `catalog.py`: Dashboard-facing catalog helpers, payload loading, and simulation artifact matching.
+  - `pipeline.py`: Preprocess orchestration, `PLOT_REGISTRY`, and `.npz` writing.
+  - `orderbook.py`: Orderbook payload builder.
+  - `exceptions.py`: Preprocess-related exception types.
+- `src/dataset_artifacts/`
+  - `catalog.py`: Naming rules, parsing, catalog discovery, and view detection for preprocessed and simulation artifacts.
+  - `__init__.py`: Public exports for the artifact API.
+- `src/plotlib/`
+  - `registry.py`: Dashboard plot registry defining plot types, labels, loaders, builders, and simulation requirements.
+  - `orderbook.py`: HoloViews orderbook payload loading and view building.
+  - `trades.py`: Plotly trades scatter and trade volume timeline loading and view building.
+  - `simulation_heatmaps.py`: Fill probability, profit, and cost-filtered heatmap builders.
+  - `options.py`, `types.py`, `errors.py`: Payload normalization, render options, and plot-related exceptions.
 - `src/simulation/`
-  - `service.py`: 提供 UI-friendly simulation 執行流程。
-  - `library.py`: simulation dataset parsing、輸出命名、平行執行等共用邏輯。
-  - `best_size_changed.py`、`event_balanced.py`、`time_averaged_random_cancellation.py`: 目前 repo 內的 simulation 演算法實作。
-- `fig/`
-  - `plot_param.json`: 舊版靜態繪圖參數。
-  - `v1/...`: 舊版輸出的靜態 order book PNG。
-- `test/`
-  - `run_simulation.py`: CLI 式 simulation 測試/操作腳本，可手動挑選 `data/v3` 批次並執行 simulation。
-  - `plot_fill_prob.py`: 讀取 simulation `.npz`，用 `matplotlib` 畫 fill probability / sample count heatmap。
-- `Assignment/`
-  - `Assignment1.ipynb`: 獨立 notebook，應屬課業或分析草稿，未與主流程整合。
+  - `service.py`: Raw dataset loading, simulation orchestration, parallel execution, and `.npz` writing.
+  - `algorithms.py`: Registered algorithms and the three current simulation entrypoints.
+  - `core.py`: Shared simulation logic.
+  - `models.py`: Request and result models.
 - `data/`
-  - 目前可見子目錄: `v1/`、`v2/`、`v3/`、`preprocessed/`。
-  - `v1` 是舊版 snapshot-only JSON。
-  - `v2` 是較早期的 level2 / trade JSON 分段資料。
-  - `v3` 是目前主線使用的單商品 CSV 批次格式，檔名由 product 與 UTC timestamp 組成。
-  - `preprocessed` 目前同時存放 orderbook plot 用的 `.npz` 與 simulation 輸出的 `.npz`。
+  - `v1/`: Legacy snapshot-only JSON format.
+  - `v2/`: Legacy level2 and trade JSON format.
+  - `v3/`: Current mainline raw CSV batch format.
+  - `preprocessed/`: Base datasets and simulation artifacts.
+- `docs/`
+  - Module documentation, contracts, and API notes for the current architecture.
+- `test/`
+  - Library-level tests, refactor tests, and dashboard smoke tests.
+- `Assignment/`
+  - Coursework or analysis scratch material, not part of the mainline pipeline.
+- `fig/`
+  - Legacy plotting outputs and parameters, not part of the mainline pipeline.
 
-# 執行與行為
+## Execution And Behavior
 
-- 收資料:
-  - 依 `README.md`，`websocket.py` 應以 `server/` 為工作目錄執行。
-  - 腳本會把 `level2-...csv` 與 `trade-...csv` 寫到當前工作目錄，而不是自動寫進 `data/`。
-- 預處理:
-  - 已沒有獨立的 `gui/preprocess.py`。
-  - 目前 preprocess 由 `src.preprocess.service` 執行，預設 `time_step = 0.01` 秒。
-  - `gui/plot.py` 內建 raw batch catalog 與 preprocess 按鈕，可直接把 raw CSV 批次轉成 `.npz`。
+- Raw data collection:
+  - `server/websocket.py` should be run with `server/` as the working directory.
+  - The script writes `level2-...csv` and `trade-...csv` to the current working directory. It does not automatically write into `data/`.
+- Dashboard startup:
+  - Run `python gui/webUI.py` from the repository root.
+  - The default raw data directory is `data/v3`.
+  - The default preprocessed directory is `data/preprocessed`.
+  - `gui/webUI.py` serves the app with `pn.serve(build_app, title="Orderbook Viewer", show=True)`.
+- Preprocessing:
+  - `src.preprocess.preprocess_batch()` converts a single raw batch into `*-orderbook_for_plot.npz`.
+  - `src.preprocess.preprocess_batches()` supports batch processing.
+  - `gui/dashboard.py` exposes raw batch catalog discovery and preprocess actions in the UI.
 - Simulation:
-  - `gui/plot.py` 可直接選 raw batch 執行 simulation。
-  - simulation 預設會把結果寫到 `data/preprocessed/`，檔名包含 `simulation`、演算法名稱與可選的 `resolved_time`。
-  - `test/run_simulation.py` 也能在終端互動式執行 simulation。
-- 視覺化:
-  - `gui/plot.py` 不再是只看單一硬編碼 dataset 的腳本，而是完整 dashboard。
-  - dashboard 預設 raw data 目錄是 `data/v3`，preprocessed 目錄是 `data/preprocessed`，但 raw data 路徑可在 UI 中切換。
-  - 啟動後會用 `pn.serve(..., show=True)` 開本地服務與瀏覽器視窗。
-  - 可渲染的圖表類型由 `src.plots.registry.PLOT_REGISTRY` 決定。
+  - `src.simulation.simulate_batch()` and `simulate_batches()` write outputs to `data/preprocessed/`.
+  - Simulation filenames include `time_step`, `resolved_time`, and `algorithm_name`.
+  - `gui/dashboard.py` can run simulation directly from the UI on selected raw batches.
+- Visualization:
+  - Current base plots include `Orderbook`, `Trades Scatter`, and `Trade Volume Timeline`.
+  - Current simulation plots include `Fill Probability`, `Mid Profit`, `Micro Profit`, and two cost-filtered fill probability heatmaps.
+  - Plot availability is driven by `src.plotlib.registry.APP_PLOT_REGISTRY`.
 
-# 依賴現況
+## Data Formats
 
-`requirements.txt` 目前列出:
+- `v1`
+  - Legacy snapshot-only JSON.
+- `v2`
+  - Legacy multi-product JSON event format.
+- `v3`
+  - Current mainline single-product CSV batch format:
+    - `level2-{product_id}-init-{timestamp}.csv`
+    - `level2-{product_id}-updates-{timestamp}.csv`
+    - `trade-{product_id}-{timestamp}.csv`
+- `preprocessed orderbook dataset`
+  - Filename format:
+    - `{product_id}-{timestamp}-{time_step}-orderbook_for_plot.npz`
+- `simulation dataset`
+  - Filename format:
+    - `{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm_name}.npz`
+
+## Dependency Status
+
+`requirements.txt` currently lists:
 
 - `aiocsv`
 - `aiofiles`
@@ -78,12 +169,14 @@
 - `panel`
 - `plotly`
 
-# 重要注意事項
+## Important Notes
 
-- `server/websocket.py` 目前假設一次只追一個商品，多商品會直接停止。
-- `server/websocket.py` 的輸出檔名不含資料夾路徑，執行位置會直接影響檔案落點。
-- `gui/plot.py` 雖然已模組化不少邏輯，但仍屬研究/內部工具型 dashboard，不是成熟的可配置 CLI 或 package entrypoint。
-- `data/preprocessed/` 目前混放兩類輸出: plot 用 orderbook `.npz` 與 simulation `.npz`；改資料流程時要注意檔名規則與 catalog 邏輯。
-- `src.preprocess.catalog` 透過檔名 regex 判斷資料類型，若調整命名規則，preprocess 與 dashboard catalog 會一起受影響。
-- `src.plots.registry` 是目前 preprocess 能否產生 payload、dashboard 能否顯示 plot 的核心註冊點；新增/移除圖表通常要同步更新這裡。
-- 專案中仍保留 `data/v1`、`data/v2`、`fig/v1` 與 `Assignment/` 等舊資料或實驗產物，修改主流程時不要誤把它們當成目前 production pipeline。
+- `server/websocket.py` currently supports only one product at a time.
+- Timestamps in filenames use UTC.
+- `data/preprocessed/` currently mixes two output categories:
+  - `*-orderbook_for_plot.npz`
+  - `*-simulation-*.npz`
+- `src.preprocess.pipeline.PLOT_REGISTRY` determines which base preprocess payloads are produced.
+- `src.dataset_artifacts.catalog` relies on filename regexes and `.npz` keys to build the catalog. If naming rules or payload keys change, update the related modules and docs together.
+- `src.plotlib.registry.APP_PLOT_REGISTRY` is the central registration point for dashboard plot availability.
+- `Assignment/`, `fig/v1/`, `data/v1/`, and `data/v2/` are legacy or experimental artifacts and should not be treated as the current production pipeline.

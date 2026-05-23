@@ -1,24 +1,18 @@
 # Preprocess Formats And Contracts
 
-本文件描述 `src.preprocess` 寫出的 preprocessed `.npz` 與 `load_preprocessed_payload(...)` 對資料 schema 的要求。
+這份文件只描述 preprocess 產出的 base dataset contract，也就是 `*-orderbook_for_plot.npz` 需要滿足的欄位與約束。
 
-## Artifact 檔名
-
-檔名格式：
+## 輸出檔名
 
 ```text
 {product_id}-{timestamp}-{time_step}-orderbook_for_plot.npz
 ```
 
-範例：
+實際路徑由 `src.dataset_artifacts.build_preprocessed_output_path()` 統一建構。
 
-```text
-ETH-USD-20240501.120000-0.01-orderbook_for_plot.npz
-```
+## 最低必要欄位
 
-## `.npz` 最低需求
-
-所有 preprocessed dataset 至少要能通過 orderbook schema 驗證，也就是必須包含：
+所有可被 dashboard 視為有效 preprocessed dataset 的 `.npz` 至少要有：
 
 - `price_axis`
 - `time_axis`
@@ -26,22 +20,26 @@ ETH-USD-20240501.120000-0.01-orderbook_for_plot.npz
 - `bid`
 - `ask`
 
-`mid` 不是強制欄位。若缺少，`src.plotlib.types.normalize_orderbook_payload_to_v1(...)` 會以 `(bid + ask) / 2` 補出。
+這五個欄位同時也是 `src.preprocess.catalog._validate_preprocessed_payload_schema()` 的基本驗證條件。
 
-如果 dataset 也支援 trade 類 view，則還應包含：
+## 可選欄位
 
+目前 preprocess 也會寫入：
+
+- `available_views`
 - `trade_time`
 - `trade_price`
 - `trade_volume`
 - `trade_side`
 
-另外 preprocess 會寫入：
+其中 trades 四個欄位可讓同一份 `.npz` 同時支援：
 
-- `available_views`
+- `trades_scatter`
+- `trade_volume_timeline`
 
-## 陣列 shape contract
+## 維度契約
 
-`load_preprocessed_payload(...)` 目前會驗證：
+base orderbook payload 必須滿足：
 
 - `time_axis.ndim == 1`
 - `price_axis.ndim == 1`
@@ -54,41 +52,46 @@ ETH-USD-20240501.120000-0.01-orderbook_for_plot.npz
 - `ask.shape[0] == time_axis.shape[0]`
 - `data.shape[1] == price_axis.shape[0]`
 
-如果任一條件不成立，會丟出 `PreprocessedDataSchemaError`。
-
-## orderbook payload 的語意
-
-- `price_axis`
-  - 升冪排列的價格 level
-- `time_axis`
-  - `datetime64[ns]` 陣列
-- `data`
-  - shape 為 `(time, price)`
-  - 來自 orderbook snapshot 序列
-- `bid`
-  - 每個 time sample 的最佳 bid 價格
-- `ask`
-  - 每個 time sample 的最佳 ask 價格
-- `mid`
-  - 每個 time sample 的中間價，可選
-
-## trade payload 的語意
-
-- `trade_time`
-  - `datetime64[ns]` 陣列
-- `trade_price`
-  - 成交價格
-- `trade_volume`
-  - 成交量
-- `trade_side`
-  - 成交方向，renderers 目前依賴其數值符號做分類
-
 ## `available_views`
 
-preprocess 會把成功產出的 builder key 寫入 `available_views`。目前可能值：
+`available_views` 是用來告訴 dashboard 與 `src.plotlib.registry` 這份 dataset 可以支援哪些圖。
+
+目前 base preprocess 會產生的值可能包含：
 
 - `orderbook`
 - `trades_scatter`
 - `trade_volume_timeline`
 
-之後 catalog 層若同時發現對應 simulation artifact，才會再把 simulation views 補進 `PreprocessedArtifact.available_views`。
+若缺少 `available_views`，catalog 仍可透過欄位存在與否重新推斷。
+
+## Trades payload contract
+
+若 dataset 要支援 trades 相關圖，至少要包含：
+
+- `trade_time`
+- `trade_price`
+- `trade_volume`
+- `trade_side`
+
+語意如下：
+
+- `trade_time`
+  - `datetime64[ns]` 陣列
+- `trade_price`
+  - 成交價
+- `trade_volume`
+  - 成交量
+- `trade_side`
+  - taker side，dashboard 目前用 `-1.0` 與 `1.0` 來分色
+
+## 變更時必須同步更新的地方
+
+- 欄位 contract 變更
+  - `src/preprocess/pipeline.py`
+  - `src/preprocess/catalog.py`
+  - `src/plotlib/orderbook.py`
+  - `src/plotlib/trades.py`
+- view key 變更
+  - `src/preprocess/pipeline.py`
+  - `src/dataset_artifacts/catalog.py`
+  - `src/plotlib/registry.py`
