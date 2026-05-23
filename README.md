@@ -266,9 +266,9 @@ data/preprocessed/{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-
 
 Current module documentation lives under `docs/`:
 
-- [docs/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/README.md)
-- [docs/raw_batches/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/raw_batches/README.md)
-- [docs/preprocess/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/preprocess/README.md)
-- [docs/dataset_artifacts/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/dataset_artifacts/README.md)
-- [docs/simulation/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/simulation/README.md)
-- [docs/plotlib/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/README.md)
+- [docs/README.md](docs/README.md)
+- [docs/raw_batches/README.md](docs/raw_batches/README.md)
+- [docs/preprocess/README.md](docs/preprocess/README.md)
+- [docs/dataset_artifacts/README.md](docs/dataset_artifacts/README.md)
+- [docs/simulation/README.md](docs/simulation/README.md)
+- [docs/plotlib/README.md](docs/plotlib/README.md)

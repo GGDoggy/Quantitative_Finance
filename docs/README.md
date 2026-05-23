@@ -4,15 +4,15 @@
 
 ## 建議閱讀順序
 
-1. [raw_batches/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/raw_batches/README.md)
+1. [raw_batches/README.md](raw_batches/README.md)
    說明 `data/v3` 原始 CSV 批次的命名、發現與載入。
-2. [preprocess/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/preprocess/README.md)
+2. [preprocess/README.md](preprocess/README.md)
    說明 raw batch 如何轉成 dashboard 可讀取的 preprocessed `.npz`。
-3. [dataset_artifacts/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/dataset_artifacts/README.md)
+3. [dataset_artifacts/README.md](dataset_artifacts/README.md)
    說明 `data/preprocessed` 內 artifact 的命名、catalog 與 view 偵測。
-4. [simulation/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/simulation/README.md)
+4. [simulation/README.md](simulation/README.md)
    說明 simulation 的 request、演算法與輸出檔。
-5. [plotlib/README.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/README.md)
+5. [plotlib/README.md](plotlib/README.md)
    說明 dashboard 讀取 payload 後如何建構各種圖。
 
 ## 主線資料流

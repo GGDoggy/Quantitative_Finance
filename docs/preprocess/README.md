@@ -2,8 +2,8 @@
 
 `src.preprocess` 把 `RawBatch` 轉成 dashboard 可直接使用的 preprocessed `.npz`。目前主實作集中在：
 
-- [formats-and-contracts.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/preprocess/formats-and-contracts.md)
-- [module-reference.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/preprocess/module-reference.md)
+- [formats-and-contracts.md](formats-and-contracts.md)
+- [module-reference.md](module-reference.md)
 
 ## 目前入口
 

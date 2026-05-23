@@ -4,9 +4,9 @@
 
 細節請看：
 
-- [api.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/simulation/api.md)
-- [algorithms.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/simulation/algorithms.md)
-- [data-format.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/simulation/data-format.md)
+- [api.md](api.md)
+- [algorithms.md](algorithms.md)
+- [data-format.md](data-format.md)
 
 ## 主流程
 

@@ -4,8 +4,8 @@
 
 細節請看：
 
-- [architecture.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/architecture.md)
-- [api.md](/C:/Users/tedhu/Desktop/prog/python/Quantitative_Finance/docs/plotlib/api.md)
+- [architecture.md](architecture.md)
+- [api.md](api.md)
 
 ## 模組分工
 
