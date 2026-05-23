@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,7 +10,6 @@ from typing import Callable, Iterable
 
 import numpy as np
 
-from src.preprocess.adapters.plot_registry_detector import PlotRegistryViewDetector
 from src.preprocess.exceptions import (
     PreprocessedDataFileError,
     PreprocessedDataSchemaError,
@@ -22,6 +22,29 @@ from src.preprocess.models import PlotDatasetLocator, PreprocessContext, Preproc
 
 
 ViewDetector = Callable[[Iterable[str]], tuple[str, ...]]
+ViewOrder = Sequence[str] | tuple[str, ...]
+
+DEFAULT_VIEW_ORDER = (
+    "orderbook",
+    "trades_scatter",
+    "trade_volume_timeline",
+    "fill_probability",
+    "mid_profit",
+    "micro_profit",
+    "mid_fill_probability_cost",
+    "micro_fill_probability_cost",
+)
+DEFAULT_PREPROCESS_VIEW_SPECS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("orderbook", frozenset(("price_axis", "time_axis", "data", "bid", "ask"))),
+    (
+        "trades_scatter",
+        frozenset(("trade_time", "trade_price", "trade_volume", "trade_side")),
+    ),
+    (
+        "trade_volume_timeline",
+        frozenset(("trade_time", "trade_price", "trade_volume", "trade_side")),
+    ),
+)
 
 
 def read_csv_rows(path: Path) -> list[list[float]]:
@@ -79,10 +102,12 @@ def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
 
 
 def _default_view_detector(data_keys: Iterable[str]) -> tuple[str, ...]:
-    from src.plots.registry import PLOT_REGISTRY
-
-    detector = PlotRegistryViewDetector(PLOT_REGISTRY)
-    return detector(data_keys)
+    keys = set(data_keys)
+    return tuple(
+        view_key
+        for view_key, required_keys in DEFAULT_PREPROCESS_VIEW_SPECS
+        if required_keys.issubset(keys)
+    )
 
 
 def detect_available_views(
@@ -103,9 +128,10 @@ def detect_available_views(
     return available_views or ("orderbook",)
 
 
-def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
-    from src.plots.registry import PLOT_REGISTRY
-
+def _union_available_views(
+    *view_groups: Iterable[str],
+    preferred_order: ViewOrder = DEFAULT_VIEW_ORDER,
+) -> tuple[str, ...]:
     seen: set[str] = set()
     encountered: list[str] = []
     for view_group in view_groups:
@@ -115,8 +141,8 @@ def _union_available_views(*view_groups: Iterable[str]) -> tuple[str, ...]:
             seen.add(view)
             encountered.append(view)
 
-    ordered_views = [view for view in PLOT_REGISTRY if view in seen]
-    ordered_views.extend(view for view in encountered if view not in PLOT_REGISTRY)
+    ordered_views = [view for view in preferred_order if view in seen]
+    ordered_views.extend(view for view in encountered if view not in preferred_order)
     return tuple(ordered_views)
 
 

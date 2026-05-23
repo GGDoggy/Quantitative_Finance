@@ -18,6 +18,7 @@ from src.preprocess.filenames import (
     parse_simulation_filename,
 )
 from src.preprocess.io import (
+    DEFAULT_VIEW_ORDER,
     _union_available_views,
     detect_available_views,
     iter_files,
@@ -155,7 +156,10 @@ def discover_preprocessed_datasets(
 
             entry["orderbook_path"] = file_path
             entry["time_step_token"] = time_step_token
-            entry["orderbook_views"] = _union_available_views(available_views)
+            entry["orderbook_views"] = _union_available_views(
+                available_views,
+                preferred_order=DEFAULT_VIEW_ORDER,
+            )
             continue
 
         simulation_paths = entry["simulation_paths"]
@@ -204,6 +208,7 @@ def discover_preprocessed_datasets(
                     available_views=_union_available_views(
                         base_views,
                         simulation_view_keys,
+                        preferred_order=DEFAULT_VIEW_ORDER,
                     ),
                     time_step_token=time_step_token,
                     resolved_time=(

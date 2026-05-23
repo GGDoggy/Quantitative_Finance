@@ -121,6 +121,7 @@ class DashboardActionsMixin:
             preprocessed_datasets = preprocess_batches(
                 selected_batches,
                 output_dir=self.preprocessed_dir,
+                builder_registry=PLOT_REGISTRY,
                 progress_callback=update_progress,
             )
             self.refresh_catalog()

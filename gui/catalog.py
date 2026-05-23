@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.plots import PLOT_LABELS, PLOT_REGISTRY
+from src.preprocess.adapters.plot_registry_detector import PlotRegistryViewDetector
 from src.preprocess import (
     PreprocessedDataset,
     discover_preprocessed_datasets,
@@ -20,7 +21,10 @@ class DashboardCatalogMixin:
 
     def refresh_catalog(self) -> None:
         """Reload raw batches and preprocessed datasets from the configured paths."""
-        datasets = discover_preprocessed_datasets(self.preprocessed_dir)
+        datasets = discover_preprocessed_datasets(
+            self.preprocessed_dir,
+            view_detector=PlotRegistryViewDetector(PLOT_REGISTRY),
+        )
         batches = discover_raw_batches(self.raw_dir, self.preprocessed_dir)
         self.preprocessed_datasets = datasets
         self.preprocessed_by_label = {

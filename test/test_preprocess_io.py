@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import importlib
+import sys
+
 import numpy as np
 import pytest
 
 from src.preprocess.exceptions import PreprocessedDataFileError, PreprocessedDataSchemaError
-from src.preprocess.io import build_trade_arrays, detect_available_views, read_csv_rows
+from src.preprocess.io import (
+    DEFAULT_VIEW_ORDER,
+    _union_available_views,
+    build_trade_arrays,
+    detect_available_views,
+    read_csv_rows,
+)
 from src.preprocess.models import PreprocessedDataset
 
 
@@ -74,6 +83,51 @@ def test_detect_available_views_uses_detector_when_available_views_missing(tmp_p
         "data",
         "price_axis",
     )
+
+
+def test_detect_available_views_uses_builtin_detector_when_available_views_missing(tmp_path):
+    path = tmp_path / "dataset.npz"
+    np.savez(
+        path,
+        price_axis=np.array([1.0]),
+        time_axis=np.array([1.0]),
+        data=np.ones((1, 1)),
+        bid=np.array([1.0]),
+        ask=np.array([2.0]),
+        trade_time=np.array([1.0]),
+        trade_price=np.array([2.0]),
+        trade_volume=np.array([3.0]),
+        trade_side=np.array([4.0]),
+    )
+
+    assert detect_available_views(path) == (
+        "orderbook",
+        "trades_scatter",
+        "trade_volume_timeline",
+    )
+
+
+def test_union_available_views_uses_builtin_order_and_preserves_unknown_order():
+    assert _union_available_views(
+        ("micro_profit", "custom_b"),
+        ("orderbook", "custom_a", "fill_probability"),
+        preferred_order=DEFAULT_VIEW_ORDER,
+    ) == (
+        "orderbook",
+        "fill_probability",
+        "micro_profit",
+        "custom_b",
+        "custom_a",
+    )
+
+
+def test_preprocess_io_import_does_not_load_plot_registry():
+    sys.modules.pop("src.preprocess.io", None)
+    sys.modules.pop("src.plots.registry", None)
+
+    importlib.import_module("src.preprocess.io")
+
+    assert "src.plots.registry" not in sys.modules
 
 
 def test_detect_available_views_raises_file_error_for_invalid_npz(tmp_path):
