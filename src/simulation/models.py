@@ -1,10 +1,9 @@
-"""Shared data models for simulation services and helpers."""
+"""Core data models for the simulation library."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 import math
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -130,8 +129,3 @@ class SimulationWorkerPayload:
             output_path=Path(self.output_file),
             overwritten=self.overwritten,
         )
-
-
-SimulationArray = np.ndarray
-SimulationAlgorithmOutput = tuple[SimulationArray, ...]
-SimulationSerializable = dict[str, Any]

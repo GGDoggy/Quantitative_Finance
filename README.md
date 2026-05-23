@@ -19,9 +19,9 @@ Coinbase market-data collection, visualization, and simulation experiments.
 - `src/plots/`
   - Non-UI plot builders and plot registry definitions.
 - `src/simulation/`
-  - Fill-probability simulation module with a preferred library API plus temporary compatibility wrappers.
+  - Fill-probability simulation library module for loading raw datasets and running batch simulations.
 - `test/`
-  - Small scripts for legacy plotting and simulation experiments.
+  - Small plotting and library-level validation helpers.
 
 ## Notes
 
@@ -33,28 +33,25 @@ Coinbase market-data collection, visualization, and simulation experiments.
 
 ## Simulation Module
 
-Use `src.simulation` as the preferred import surface inside this repo. Legacy
-helpers remain available during the transition for existing scripts and tests.
+`src.simulation` is a library-only module. It does not provide CLI wrappers,
+interactive entrypoints, or GUI adapters.
 
-- Preferred public entry points:
+- Public entry points:
+  - `RawSimulationDataset`
+  - `LoadedMarketData`
+  - `SimulationRequest`
+  - `SimulationResult`
+  - `SimulationJobResult`
   - `list_algorithms()`
   - `load_raw_dataset()`
   - `simulate_loaded_data()`
   - `simulate_batch()`
   - `simulate_batches()`
-  - `save_result()`
-- GUI adapter entry points:
-  - `simulate_raw_batch()`
-  - `simulate_raw_batches()`
-- Transitional compatibility entry points:
-  - `src.simulation.compat`
-  - `src.simulation.library`
-  - New code should not add imports from these modules.
 - Internal implementation modules:
+  - `models.py`: typed request/result containers
   - `registry.py`: algorithm lookup
-  - `io.py`: raw CSV loading and `.npz` serialization
+  - `io.py`: raw CSV discovery/loading and `.npz` serialization
   - `runner.py`: orchestration and parallel execution
-  - `service.py`: GUI-facing adapter from `RawBatch`
 
 Recommended setup for repo-local imports:
 
@@ -66,13 +63,6 @@ Example preferred usage:
 
 ```python
 from src.simulation import SimulationRequest, list_algorithms, simulate_batch
-```
-
-Interactive helpers are available through both module and wrapper entry points:
-
-```bash
-python -m src.simulation
-python test/run_simulation.py
 ```
 
 ## Data Layout
