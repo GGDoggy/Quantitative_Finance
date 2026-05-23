@@ -1,6 +1,6 @@
 """Public package exports for the interactive Panel dashboard."""
 
-from .app import build_app, main
 from .dashboard import OrderbookDashboard
+from .webUI import build_app, main
 
 __all__ = ["OrderbookDashboard", "build_app", "main"]

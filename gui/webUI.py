@@ -1,14 +1,20 @@
-"""Application bootstrap helpers and default paths for the dashboard package."""
+"""Single entrypoint for the Panel web dashboard."""
 
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import holoviews as hv
 import panel as pn
 
-from .dashboard import OrderbookDashboard
-from .styles import DASHBOARD_CSS
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from gui.dashboard import OrderbookDashboard
+    from gui.styles import DASHBOARD_CSS
+else:
+    from .dashboard import OrderbookDashboard
+    from .styles import DASHBOARD_CSS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +24,7 @@ DASHBOARD_SETTINGS_PATH = PROJECT_ROOT / "gui" / "dashboard_settings.json"
 
 
 def build_app():
-    """Initialize Panel extensions and build the dashboard template."""
+    """Initialize Panel extensions and return the dashboard template."""
     hv.extension("bokeh")
     pn.extension("plotly", raw_css=[DASHBOARD_CSS])
     dashboard = OrderbookDashboard(
@@ -31,5 +37,9 @@ def build_app():
 
 
 def main() -> None:
-    """Serve the dashboard as a local Panel application."""
+    """Serve the dashboard as a local Panel app."""
     pn.serve(build_app, title="Orderbook Viewer", show=True)
+
+
+if __name__ == "__main__":
+    main()
