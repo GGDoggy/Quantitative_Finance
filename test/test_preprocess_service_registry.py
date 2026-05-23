@@ -38,7 +38,10 @@ def test_preprocess_batch_default_registry_output_is_unchanged(tmp_path, monkeyp
     batch = _make_batch(tmp_path)
     output_dir = tmp_path / "out"
 
-    monkeypatch.setattr("src.preprocess.service.build_context", lambda *_args: object())
+    monkeypatch.setattr(
+        "src.preprocess.service.build_preprocess_context",
+        lambda *_args: object(),
+    )
 
     default_registry = {
         "orderbook": StubBuilderSpec(
@@ -75,7 +78,10 @@ def test_preprocess_batch_with_stub_registry_writes_available_views(tmp_path, mo
     batch = _make_batch(tmp_path)
     output_dir = tmp_path / "out"
 
-    monkeypatch.setattr("src.preprocess.service.build_context", lambda *_args: object())
+    monkeypatch.setattr(
+        "src.preprocess.service.build_preprocess_context",
+        lambda *_args: object(),
+    )
 
     stub_registry = {
         "mini_view": StubBuilderSpec(

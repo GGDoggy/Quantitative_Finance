@@ -8,10 +8,9 @@ import re
 from typing import Match
 
 from src.preprocess.exceptions import PreprocessValidationError
-from src.simulation.constants import DEFAULT_RESOLVED_TIME
 
 
-DEFAULT_RESOLVED_TIME_FALLBACK = DEFAULT_RESOLVED_TIME
+DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
 
 TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
 

@@ -23,6 +23,7 @@ from src.preprocess.filenames import (
         (0.01, "0.01"),
         ("1e-2", "0.01"),
         ("1.2300", "1.23"),
+        ("1E-3", "0.001"),
     ),
 )
 def test_format_time_step_normalizes_supported_inputs(value, expected):
@@ -76,6 +77,9 @@ def test_filename_match_helpers_distinguish_supported_patterns():
 
 def test_filename_match_helpers_reject_invalid_names():
     assert not match_raw_level2_init_filename("level2-ETH-USD-20240101.000000.csv")
+    assert not match_raw_level2_updates_filename("level2-ETH-USD-init-20240101.000000.csv")
+    assert not match_raw_trade_filename("trade-ETH-USD.csv")
     assert not match_preprocessed_filename("ETH-USD-20240101.000000-orderbook_for_plot.npz")
+    assert not match_preprocessed_filename("ETH-USD-20240101.000000-0.01-other.npz")
     assert not is_preprocessed_filename("ETH-USD.txt")
     assert not is_simulation_filename("simulation-event_balanced.npz")

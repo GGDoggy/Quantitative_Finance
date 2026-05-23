@@ -15,11 +15,10 @@ from .catalog import (
     discover_preprocessed_datasets,
     discover_raw_batches,
     find_simulation_files,
-    format_time_step,
     has_simulation_file,
-    load_preprocessed_payload,
-    parse_timestamp,
 )
+from .filenames import format_time_step, parse_timestamp
+from .io import load_preprocessed_payload
 from .models import PlotDatasetLocator, PreprocessContext, PreprocessedDataset, RawBatch
 from .service import DEFAULT_TIME_STEP, preprocess_batch, preprocess_batches
 
@@ -48,13 +47,9 @@ __all__ = [
 ]
 
 _DEPRECATED_ALIASES = {
-    "detect_available_views": (
-        "src.preprocess.catalog.detect_available_views",
-        "Import detect_available_views from src.preprocess.catalog instead.",
-    ),
     "build_context": (
-        "src.preprocess.common.build_context",
-        "Import build_context from src.preprocess.common instead.",
+        "src.preprocess.io.build_context",
+        "Import build_context from src.preprocess.io instead.",
     ),
 }
 

@@ -1,4 +1,4 @@
-"""CSV/NPZ I/O helpers for preprocess discovery and payload loading."""
+"""CSV/NPZ I/O helpers for preprocess discovery, payload loading, and context building."""
 from __future__ import annotations
 
 import csv
@@ -87,12 +87,8 @@ def _default_view_detector(data_keys: Iterable[str]) -> tuple[str, ...]:
 
 def detect_available_views(
     path: Path,
-    dataset_hint: PlotDatasetLocator | None = None,
     view_detector: ViewDetector | None = None,
 ) -> tuple[str, ...]:
-    from src.plots.registry import PLOT_REGISTRY
-    from src.preprocess.catalog import SIMULATION_VIEW_KEYS, has_simulation_file
-
     try:
         with np.load(path, allow_pickle=False) as data:
             if "available_views" in data.files:
@@ -103,26 +99,6 @@ def detect_available_views(
                 available_views = detector(data_keys)
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         raise PreprocessedDataFileError(f"Failed to inspect {path.name}: {error}") from error
-
-    if (
-        dataset_hint is not None
-        and any(view_key in PLOT_REGISTRY for view_key in SIMULATION_VIEW_KEYS)
-        and has_simulation_file(
-            dataset_hint.preprocessed_dir,
-            dataset_hint.product_id,
-            dataset_hint.timestamp,
-            dataset_hint.time_step,
-            dataset_hint.time_step_token,
-        )
-    ):
-        available_views = _union_available_views(
-            available_views,
-            tuple(
-                view_key
-                for view_key in SIMULATION_VIEW_KEYS
-                if view_key in PLOT_REGISTRY
-            ),
-        )
 
     return available_views or ("orderbook",)
 

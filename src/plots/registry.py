@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.preprocess import PlotDatasetLocator
+    from src.preprocess import PlotDatasetLocator, PreprocessContext
     from src.plots.settings import PlotRenderOptions
     from src.plots.types import PlotBuilder
 
 
-PreprocessBuilder = Callable[[object], dict[str, object]]
+PreprocessBuilder = Callable[["PreprocessContext"], dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -100,19 +100,19 @@ def build_micro_cost_fill_probability_view(
     return implementation(locators, render_options=render_options)
 
 
-def build_orderbook_payload(context: object) -> dict[str, object]:
+def build_orderbook_payload(context: "PreprocessContext") -> dict[str, object]:
     from src.preprocess.orderbook import build_orderbook_payload as implementation
 
     return implementation(context)
 
 
-def build_trades_scatter_payload(context: object) -> dict[str, object]:
+def build_trades_scatter_payload(context: "PreprocessContext") -> dict[str, object]:
     from src.preprocess.trades_scatter import build_trades_scatter_payload as implementation
 
     return implementation(context)
 
 
-def build_trade_volume_timeline_payload(context: object) -> dict[str, object]:
+def build_trade_volume_timeline_payload(context: "PreprocessContext") -> dict[str, object]:
     from src.preprocess.trade_volume_timeline import (
         build_trade_volume_timeline_payload as implementation,
     )

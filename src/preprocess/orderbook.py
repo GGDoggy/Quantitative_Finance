@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import calendar
 from datetime import datetime, timedelta
+import time
 
 import numpy as np
 
-from .common import PreprocessContext, file_time_to_unix
+from .models import PreprocessContext
+
+
+def _timestamp_to_unix(timestamp: str) -> int:
+    parsed = time.strptime(timestamp, "%Y%m%d.%H%M%S")
+    return calendar.timegm(parsed)
 
 
 def update_orderbook(orderbook: np.ndarray, price_levels: np.ndarray, price: float, volume: float, side: float) -> None:
@@ -105,7 +112,7 @@ def build_orderbook_payload(context: PreprocessContext) -> dict[str, object]:
     price_axis, time_axis, data, bid, ask, mid = build_orderbook_history(
         context.init_rows,
         context.updates_rows,
-        file_time_to_unix(context.batch.timestamp),
+        _timestamp_to_unix(context.batch.timestamp),
         context.time_step,
     )
     return {

@@ -1,3 +1,4 @@
+"""Internal transitional re-export facade for legacy preprocess helpers."""
 from __future__ import annotations
 
 import calendar

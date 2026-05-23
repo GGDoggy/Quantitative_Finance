@@ -4,31 +4,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Iterable
 
-from src.preprocess.exceptions import (
-    PreprocessedDataError,
-)
+from src.preprocess.exceptions import PreprocessedDataError
 from src.preprocess.filenames import (
     DEFAULT_RESOLVED_TIME_FALLBACK,
     SimulationFileMetadata,
     _matches_resolved_time,
     _simulation_time_step_tokens,
     _simulation_value_tokens,
-    format_time_step,
     match_preprocessed_filename,
     match_raw_level2_init_filename,
     match_raw_level2_updates_filename,
     match_raw_trade_filename,
     parse_simulation_filename,
-    parse_timestamp,
 )
 from src.preprocess.io import (
     _union_available_views,
     detect_available_views,
     iter_files,
-    load_preprocessed_payload,
 )
 from src.preprocess.models import PlotDatasetLocator, PreprocessedDataset, RawBatch
-from src.plots.registry import PLOT_REGISTRY
 
 
 ViewDetector = Callable[[Iterable[str]], tuple[str, ...]]
@@ -113,6 +107,7 @@ def has_simulation_file(
 def discover_preprocessed_datasets(
     preprocessed_dir: Path,
     view_detector: ViewDetector | None = None,
+    simulation_view_keys: tuple[str, ...] = SIMULATION_VIEW_KEYS,
 ) -> list[PreprocessedDataset]:
     entries: dict[
         tuple[str, str, float],
@@ -153,21 +148,8 @@ def discover_preprocessed_datasets(
         )
 
         if preprocessed_match:
-            locator = PlotDatasetLocator(
-                product_id=product_id,
-                timestamp=timestamp,
-                time_step=time_step,
-                preprocessed_dir=preprocessed_dir,
-                time_step_token=time_step_token,
-                original_path=file_path,
-            )
-
             try:
-                available_views = detect_available_views(
-                    file_path,
-                    locator,
-                    view_detector=view_detector,
-                )
+                available_views = detect_available_views(file_path, view_detector=view_detector)
             except PreprocessedDataError:
                 continue
 
@@ -221,11 +203,7 @@ def discover_preprocessed_datasets(
                     ),
                     available_views=_union_available_views(
                         base_views,
-                        tuple(
-                            view_key
-                            for view_key in SIMULATION_VIEW_KEYS
-                            if view_key in PLOT_REGISTRY
-                        ),
+                        simulation_view_keys,
                     ),
                     time_step_token=time_step_token,
                     resolved_time=(

@@ -29,6 +29,7 @@ def test_build_trade_arrays_handles_empty_rows():
     assert trade_price.shape == (0,)
     assert trade_volume.shape == (0,)
     assert trade_side.shape == (0,)
+    assert trade_time.dtype == "datetime64[ns]"
     assert trade_price.dtype == float
 
 
@@ -55,6 +56,7 @@ def test_build_trade_arrays_handles_multiple_rows():
     assert trade_price.dtype == float
     assert trade_volume.dtype == float
     assert trade_side.dtype == float
+    assert str(trade_time.dtype) == "datetime64[ns]"
 
 
 def test_detect_available_views_prefers_available_views_field(tmp_path):
@@ -107,3 +109,93 @@ def test_load_preprocessed_payload_reports_axis_dimensionality_errors(tmp_path):
         load_preprocessed_payload(dataset)
 
     assert "invalid axis dimensionality" in str(exc.value)
+
+
+def test_load_preprocessed_payload_raises_file_error_for_invalid_npz(tmp_path):
+    path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    path.write_bytes(b"invalid")
+    dataset = PreprocessedDataset(
+        product_id="ETH-USD",
+        timestamp="20240101.000000",
+        time_step=0.01,
+        path=path,
+        available_views=("orderbook",),
+    )
+
+    from src.preprocess.io import load_preprocessed_payload
+
+    with pytest.raises(PreprocessedDataFileError):
+        load_preprocessed_payload(dataset)
+
+
+def test_load_preprocessed_payload_reports_missing_fields(tmp_path):
+    path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    np.savez(path, price_axis=np.array([1.0]), data=np.ones((1, 1)))
+    dataset = PreprocessedDataset(
+        product_id="ETH-USD",
+        timestamp="20240101.000000",
+        time_step=0.01,
+        path=path,
+        available_views=("orderbook",),
+    )
+
+    from src.preprocess.io import load_preprocessed_payload
+
+    with pytest.raises(PreprocessedDataSchemaError) as exc:
+        load_preprocessed_payload(dataset)
+
+    assert "missing required fields" in str(exc.value)
+
+
+def test_load_preprocessed_payload_reports_incompatible_axis_lengths(tmp_path):
+    path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    np.savez(
+        path,
+        price_axis=np.array([1.0, 2.0]),
+        time_axis=np.array([1.0]),
+        data=np.ones((1, 3)),
+        bid=np.ones((1,)),
+        ask=np.ones((1,)),
+    )
+    dataset = PreprocessedDataset(
+        product_id="ETH-USD",
+        timestamp="20240101.000000",
+        time_step=0.01,
+        path=path,
+        available_views=("orderbook",),
+    )
+
+    from src.preprocess.io import load_preprocessed_payload
+
+    with pytest.raises(PreprocessedDataSchemaError) as exc:
+        load_preprocessed_payload(dataset)
+
+    assert "incompatible data/bid/ask axis lengths" in str(exc.value)
+
+
+def test_load_preprocessed_payload_attaches_metadata_on_success(tmp_path):
+    path = tmp_path / "ETH-USD-20240101.000000-0.01-orderbook_for_plot.npz"
+    np.savez(
+        path,
+        price_axis=np.array([1.0]),
+        time_axis=np.array([1.0]),
+        data=np.ones((1, 1)),
+        bid=np.ones((1,)),
+        ask=np.ones((1,)),
+    )
+    dataset = PreprocessedDataset(
+        product_id="ETH-USD",
+        timestamp="20240101.000000",
+        time_step=0.01,
+        path=path,
+        available_views=("orderbook",),
+    )
+
+    from src.preprocess.io import load_preprocessed_payload
+
+    payload = load_preprocessed_payload(dataset)
+
+    assert payload["product_id"] == "ETH-USD"
+    assert payload["timestamp"] == "20240101.000000"
+    assert payload["time_step"] == 0.01
+    assert payload["available_views"] == ("orderbook",)

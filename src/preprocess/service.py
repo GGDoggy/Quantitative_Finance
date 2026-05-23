@@ -1,24 +1,25 @@
 """Coordinate registered preprocess builders and write dashboard-ready datasets."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 import tempfile
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Protocol
 
 import numpy as np
 
 from .catalog import discover_preprocessed_datasets
 from .filenames import format_time_step
-from .io import build_context
+from .io import build_preprocess_context
 from src.preprocess.exceptions import PreprocessOutputConflictError
-from .models import PreprocessedDataset, RawBatch
+from .models import PreprocessContext, PreprocessedDataset, RawBatch
 
 
 DEFAULT_TIME_STEP = 0.01
 
 
 class BuilderSpec(Protocol):
-    preprocess_builder: Callable[[object], dict[str, object]] | None
+    preprocess_builder: Callable[[PreprocessContext], dict[str, object]] | None
     required_payload_keys: tuple[str, ...]
 
 
@@ -54,7 +55,7 @@ def preprocess_batch(
     time_step: float = DEFAULT_TIME_STEP,
     builder_registry: Mapping[str, BuilderSpec] | None = None,
 ) -> PreprocessedDataset:
-    context = build_context(batch, time_step)
+    context = build_preprocess_context(batch, time_step)
     payload: dict[str, object] = {}
     available_views: list[str] = []
     registry = (
