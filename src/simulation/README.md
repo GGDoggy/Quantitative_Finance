@@ -1,8 +1,8 @@
 # `src.simulation` Internal Module
 
 `src.simulation` is the preferred import surface for simulation code in this repo.
-Compatibility wrappers remain available while the rest of the repo finishes
-moving off the old API.
+New code should import only from `src.simulation`. Compatibility wrappers remain
+available only for legacy scripts that have not migrated yet.
 
 ## Public API
 
@@ -21,14 +21,28 @@ moving off the old API.
 - `runner.py`: request execution and parallel batch orchestration.
 - `service.py`: `RawBatch` adapter used by the dashboard.
 - Algorithm modules: numeric logic only; no path handling or file output.
-- `compat.py`: temporary wrappers for the old dict-based API.
-- `library.py`: transitional facade for legacy imports.
+- `compat.py`: legacy wrappers for the old dict-based API. Do not add new imports.
+- `library.py`: transitional facade for legacy imports. Do not add new imports.
 
 ## GUI Usage
 
 The dashboard should call only `src.simulation` exports. `service.py` handles
 `RawBatch -> RawSimulationDataset` conversion internally so GUI code does not
 need to import simulation internals.
+
+## Packaging
+
+Use editable install when working inside this repo:
+
+```bash
+pip install -e .
+```
+
+Example preferred imports:
+
+```python
+from src.simulation import SimulationRequest, list_algorithms, simulate_batch
+```
 
 ## Legacy Entrypoints
 

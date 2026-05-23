@@ -1,4 +1,8 @@
-"""Transitional facade that preserves the legacy import surface."""
+"""Transitional facade that preserves the legacy import surface.
+
+Do not add new imports against this module. New code should import from
+``src.simulation`` instead.
+"""
 from __future__ import annotations
 
 from .compat import (

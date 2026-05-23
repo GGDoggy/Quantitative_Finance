@@ -1,4 +1,8 @@
-"""Legacy compatibility facade for the pre-refactor simulation API."""
+"""Legacy compatibility facade for the pre-refactor simulation API.
+
+Do not add new imports against this module. New code should import from
+``src.simulation`` instead.
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

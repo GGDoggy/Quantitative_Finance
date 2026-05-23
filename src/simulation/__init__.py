@@ -1,16 +1,5 @@
-"""Preferred simulation library exports plus transitional compatibility helpers."""
+"""Official simulation library exports for in-repo consumers."""
 from .best_size_changed import ALGORITHM_NAME as BEST_SIZE_CHANGED_NAME
-from .compat import (
-    format_dataset_line,
-    get_algorithm,
-    get_algorithm_names,
-    is_processed,
-    parse_dataset_groups,
-    parse_selection,
-    run_dataset_simulation,
-    run_datasets_in_parallel,
-    save_simulation_npz,
-)
 from .constants import (
     DATA_V3_PATH,
     DEFAULT_BASE_TICK,
@@ -19,7 +8,7 @@ from .constants import (
     OUTPUT_PATH,
 )
 from .event_balanced import ALGORITHM_NAME as EVENT_BALANCED_NAME
-from .io import build_output_path, load_raw_dataset
+from .io import load_raw_dataset
 from .models import (
     LoadedMarketData,
     RawSimulationDataset,
@@ -55,14 +44,4 @@ __all__ = [
     "DEFAULT_BASE_TICK",
     "DEFAULT_TIME_STEP",
     "DEFAULT_RESOLVED_TIME",
-    "build_output_path",
-    "get_algorithm",
-    "get_algorithm_names",
-    "parse_dataset_groups",
-    "is_processed",
-    "format_dataset_line",
-    "parse_selection",
-    "run_dataset_simulation",
-    "run_datasets_in_parallel",
-    "save_simulation_npz",
 ]

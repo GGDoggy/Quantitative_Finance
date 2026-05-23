@@ -49,11 +49,24 @@ helpers remain available during the transition for existing scripts and tests.
 - Transitional compatibility entry points:
   - `src.simulation.compat`
   - `src.simulation.library`
+  - New code should not add imports from these modules.
 - Internal implementation modules:
   - `registry.py`: algorithm lookup
   - `io.py`: raw CSV loading and `.npz` serialization
   - `runner.py`: orchestration and parallel execution
   - `service.py`: GUI-facing adapter from `RawBatch`
+
+Recommended setup for repo-local imports:
+
+```bash
+pip install -e .
+```
+
+Example preferred usage:
+
+```python
+from src.simulation import SimulationRequest, list_algorithms, simulate_batch
+```
 
 Interactive helpers are available through both module and wrapper entry points:
 
