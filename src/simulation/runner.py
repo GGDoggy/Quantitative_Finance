@@ -19,7 +19,7 @@ def run_simulation_request(
     request: SimulationRequest,
     loaded_data: LoadedMarketData,
 ) -> SimulationResult:
-    algorithm = get_algorithm(request.algorithm_name)
+    algorithm = get_algorithm(request.algorithm)
     return SimulationResult.from_algorithm_output(
         algorithm(
             loaded_data.init,
@@ -48,7 +48,7 @@ def process_dataset_job(
         dataset.product_id,
         dataset.timestamp,
         request.time_step,
-        request.algorithm_name,
+        request.algorithm,
         request.resolved_time,
     )
     overwritten = output_file.exists()
@@ -56,7 +56,7 @@ def process_dataset_job(
     result = run_simulation_request(request, loaded_data)
     saved_path = save_result_file(
         output_file,
-        algorithm_name=request.algorithm_name,
+        algorithm_name=request.algorithm,
         dataset=dataset,
         time_step=request.time_step,
         base_tick=request.base_tick,

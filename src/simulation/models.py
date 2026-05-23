@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from src.preprocess.catalog import RawBatch
 
 
 @dataclass(frozen=True)
@@ -18,9 +16,9 @@ class RawSimulationDataset:
     product_id: str
     timestamp: str
     file_stem: str
-    init: Path
-    updates: Path
-    trade: Path
+    init_path: Path
+    updates_path: Path
+    trade_path: Path
 
 
 @dataclass(frozen=True)
@@ -97,15 +95,25 @@ class SimulationResult:
 
 @dataclass(frozen=True)
 class SimulationRequest:
-    algorithm_name: str
+    algorithm: str
     time_step: float
     base_tick: float
     resolved_time: float
 
+    def __post_init__(self) -> None:
+        if not self.algorithm:
+            raise ValueError("Simulation algorithm is required.")
+        if not math.isfinite(self.time_step) or self.time_step <= 0:
+            raise ValueError("Simulation time_step must be a positive finite value.")
+        if not math.isfinite(self.base_tick) or self.base_tick <= 0:
+            raise ValueError("Simulation base_tick must be a positive finite value.")
+        if not math.isfinite(self.resolved_time) or self.resolved_time < 0:
+            raise ValueError("Simulation resolved_time must be a non-negative finite value.")
+
 
 @dataclass(frozen=True)
 class SimulationJobResult:
-    raw_batch: RawBatch
+    dataset: RawSimulationDataset
     output_path: Path
     overwritten: bool
 
@@ -115,3 +123,15 @@ class SimulationWorkerPayload:
     file_stem: str
     output_file: str
     overwritten: bool
+
+    def to_job_result(self, dataset: RawSimulationDataset) -> SimulationJobResult:
+        return SimulationJobResult(
+            dataset=dataset,
+            output_path=Path(self.output_file),
+            overwritten=self.overwritten,
+        )
+
+
+SimulationArray = np.ndarray
+SimulationAlgorithmOutput = tuple[SimulationArray, ...]
+SimulationSerializable = dict[str, Any]

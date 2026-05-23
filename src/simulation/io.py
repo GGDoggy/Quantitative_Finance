@@ -96,9 +96,9 @@ def parse_dataset_groups(data_v3_path: Path | str) -> list[RawSimulationDataset]
                 product_id=product_id,
                 timestamp=timestamp,
                 file_stem=f"{product_id}-{timestamp}",
-                init=init,
-                updates=updates,
-                trade=trade,
+                init_path=init,
+                updates_path=updates,
+                trade_path=trade,
             )
         )
 
@@ -106,9 +106,9 @@ def parse_dataset_groups(data_v3_path: Path | str) -> list[RawSimulationDataset]
 
 
 def load_raw_dataset(dataset: RawSimulationDataset) -> LoadedMarketData:
-    init = read_csv(dataset.init)
-    updates = read_csv(dataset.updates)
-    trades = read_csv(dataset.trade)
+    init = read_csv(dataset.init_path)
+    updates = read_csv(dataset.updates_path)
+    trades = read_csv(dataset.trade_path)
     start_time = file_time_to_unix(dataset.timestamp)
     return LoadedMarketData(
         init=init,

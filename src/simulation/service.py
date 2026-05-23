@@ -1,11 +1,10 @@
 """UI-friendly helpers for running fill-probability simulations from raw batches."""
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from .constants import DEFAULT_RESOLVED_TIME
+from .constants import DEFAULT_BASE_TICK, DEFAULT_RESOLVED_TIME
 from .io import build_output_path, load_raw_dataset, save_result_file
 from .models import (
     LoadedMarketData,
@@ -20,34 +19,20 @@ from .runner import run_datasets_in_parallel, run_simulation_request
 if TYPE_CHECKING:
     from src.preprocess.catalog import RawBatch
 
-DEFAULT_BASE_TICK = 0.00000001
-
-
-def _validate_parameters(
-    algorithm_name: str,
-    time_step: float,
-    resolved_time: float,
-) -> None:
-    get_algorithm(algorithm_name)
-    if not math.isfinite(time_step):
-        raise ValueError("Simulation time_step must be finite.")
-    if time_step <= 0:
-        raise ValueError("Simulation time_step must be positive.")
-    if not math.isfinite(resolved_time):
-        raise ValueError("Simulation resolved_time must be finite.")
-    if resolved_time < 0:
-        raise ValueError("Simulation resolved_time must be non-negative.")
-
 
 def _to_simulation_dataset(raw_batch: RawBatch) -> RawSimulationDataset:
     return RawSimulationDataset(
         product_id=raw_batch.product_id,
         timestamp=raw_batch.timestamp,
         file_stem=f"{raw_batch.product_id}-{raw_batch.timestamp}",
-        init=raw_batch.init_path,
-        updates=raw_batch.updates_path,
-        trade=raw_batch.trade_path,
+        init_path=raw_batch.init_path,
+        updates_path=raw_batch.updates_path,
+        trade_path=raw_batch.trade_path,
     )
+
+
+def _validate_request(request: SimulationRequest) -> None:
+    get_algorithm(request.algorithm)
 
 
 def _saved_action_message(simulation_result: SimulationJobResult) -> str:
@@ -69,13 +54,13 @@ def simulate_loaded_data(
     resolved_time: float = DEFAULT_RESOLVED_TIME,
 ) -> SimulationResult:
     """Simulate from pre-loaded market arrays without re-reading CSV files."""
-    _validate_parameters(algorithm_name, time_step, resolved_time)
     request = SimulationRequest(
-        algorithm_name=algorithm_name,
+        algorithm=algorithm_name,
         time_step=time_step,
         base_tick=base_tick,
         resolved_time=resolved_time,
     )
+    _validate_request(request)
     return run_simulation_request(request, loaded_data)
 
 
@@ -90,22 +75,28 @@ def save_result(
     resolved_time: float = DEFAULT_RESOLVED_TIME,
 ) -> Path:
     """Save one simulation result to npz using standard naming convention."""
-    _validate_parameters(algorithm_name, time_step, resolved_time)
+    request = SimulationRequest(
+        algorithm=algorithm_name,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+    )
+    _validate_request(request)
     output_file = build_output_path(
         output_dir,
         dataset.product_id,
         dataset.timestamp,
-        time_step,
-        algorithm_name,
-        resolved_time,
+        request.time_step,
+        request.algorithm,
+        request.resolved_time,
     )
     return save_result_file(
         output_file,
-        algorithm_name=algorithm_name,
+        algorithm_name=request.algorithm,
         dataset=dataset,
-        time_step=time_step,
-        base_tick=base_tick,
-        resolved_time=resolved_time,
+        time_step=request.time_step,
+        base_tick=request.base_tick,
+        resolved_time=request.resolved_time,
         result=result,
     )
 
@@ -119,36 +110,36 @@ def simulate_batch(
     resolved_time: float = DEFAULT_RESOLVED_TIME,
     base_tick: float = DEFAULT_BASE_TICK,
 ) -> SimulationJobResult:
-    _validate_parameters(algorithm_name, time_step, resolved_time)
     dataset = _to_simulation_dataset(raw_batch)
+    request = SimulationRequest(
+        algorithm=algorithm_name,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+    )
+    _validate_request(request)
     output_path = build_output_path(
         output_dir,
         dataset.product_id,
         dataset.timestamp,
-        time_step,
-        algorithm_name,
-        resolved_time,
+        request.time_step,
+        request.algorithm,
+        request.resolved_time,
     )
     overwritten = output_path.exists()
     loaded_data = load_raw_dataset(dataset)
-    result = simulate_loaded_data(
-        loaded_data,
-        algorithm_name=algorithm_name,
-        time_step=time_step,
-        base_tick=base_tick,
-        resolved_time=resolved_time,
-    )
+    result = run_simulation_request(request, loaded_data)
     saved_path = save_result(
         dataset,
         output_dir=output_dir,
-        algorithm_name=algorithm_name,
-        time_step=time_step,
+        algorithm_name=request.algorithm,
+        time_step=request.time_step,
         result=result,
-        base_tick=base_tick,
-        resolved_time=resolved_time,
+        base_tick=request.base_tick,
+        resolved_time=request.resolved_time,
     )
     return SimulationJobResult(
-        raw_batch=raw_batch,
+        dataset=dataset,
         output_path=saved_path,
         overwritten=overwritten,
     )
@@ -164,7 +155,13 @@ def simulate_batches(
     base_tick: float = DEFAULT_BASE_TICK,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[SimulationJobResult]:
-    _validate_parameters(algorithm_name, time_step, resolved_time)
+    request = SimulationRequest(
+        algorithm=algorithm_name,
+        time_step=time_step,
+        base_tick=base_tick,
+        resolved_time=resolved_time,
+    )
+    _validate_request(request)
     total = len(raw_batches)
     if total <= 1:
         results: list[SimulationJobResult] = []
@@ -175,10 +172,10 @@ def simulate_batches(
             simulation_result = simulate_batch(
                 raw_batch,
                 output_dir=output_dir,
-                algorithm_name=algorithm_name,
-                time_step=time_step,
-                resolved_time=resolved_time,
-                base_tick=base_tick,
+                algorithm_name=request.algorithm,
+                time_step=request.time_step,
+                resolved_time=request.resolved_time,
+                base_tick=request.base_tick,
             )
             if progress_callback is not None:
                 progress_callback(_saved_action_message(simulation_result))
@@ -188,8 +185,8 @@ def simulate_batches(
             progress_callback(f"Finished simulation for {len(raw_batches)} batch(es).")
         return results
 
-    raw_batch_by_stem = {
-        f"{raw_batch.product_id}-{raw_batch.timestamp}": raw_batch
+    dataset_by_stem = {
+        f"{raw_batch.product_id}-{raw_batch.timestamp}": _to_simulation_dataset(raw_batch)
         for raw_batch in raw_batches
     }
     raw_batch_order = {
@@ -197,29 +194,19 @@ def simulate_batches(
         for index, raw_batch in enumerate(raw_batches)
     }
     datasets = [_to_simulation_dataset(raw_batch) for raw_batch in raw_batches]
-    request = SimulationRequest(
-        algorithm_name=algorithm_name,
-        time_step=time_step,
-        base_tick=base_tick,
-        resolved_time=resolved_time,
-    )
     job_results = run_datasets_in_parallel(
         datasets,
         output_dir,
         request,
     )
     results = [
-        SimulationJobResult(
-            raw_batch=raw_batch_by_stem[job_result.file_stem],
-            output_path=Path(job_result.output_file),
-            overwritten=bool(job_result.overwritten),
-        )
+        job_result.to_job_result(dataset_by_stem[job_result.file_stem])
         for job_result in job_results
     ]
     results.sort(
         key=lambda simulation_result: raw_batch_order[
-            f"{simulation_result.raw_batch.product_id}-"
-            f"{simulation_result.raw_batch.timestamp}"
+            f"{simulation_result.dataset.product_id}-"
+            f"{simulation_result.dataset.timestamp}"
         ]
     )
     if progress_callback is not None:

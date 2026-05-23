@@ -30,9 +30,9 @@ def test_parse_dataset_groups_discovers_complete_batches(tmp_path: Path) -> None
         product_id="ETH-USD",
         timestamp="20240101.010203",
         file_stem="ETH-USD-20240101.010203",
-        init=tmp_path / "level2-ETH-USD-init-20240101.010203.csv",
-        updates=tmp_path / "level2-ETH-USD-updates-20240101.010203.csv",
-        trade=tmp_path / "trade-ETH-USD-20240101.010203.csv",
+        init_path=tmp_path / "level2-ETH-USD-init-20240101.010203.csv",
+        updates_path=tmp_path / "level2-ETH-USD-updates-20240101.010203.csv",
+        trade_path=tmp_path / "trade-ETH-USD-20240101.010203.csv",
     )
 
 
@@ -53,9 +53,9 @@ def test_save_result_file_preserves_metadata_and_payload_keys(tmp_path: Path) ->
         product_id="ETH-USD",
         timestamp="20240101.010203",
         file_stem="ETH-USD-20240101.010203",
-        init=tmp_path / "level2-ETH-USD-init-20240101.010203.csv",
-        updates=tmp_path / "level2-ETH-USD-updates-20240101.010203.csv",
-        trade=tmp_path / "trade-ETH-USD-20240101.010203.csv",
+        init_path=tmp_path / "level2-ETH-USD-init-20240101.010203.csv",
+        updates_path=tmp_path / "level2-ETH-USD-updates-20240101.010203.csv",
+        trade_path=tmp_path / "trade-ETH-USD-20240101.010203.csv",
     )
     output_file = tmp_path / "simulation.npz"
 

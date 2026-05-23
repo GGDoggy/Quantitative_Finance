@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from src.preprocess.catalog import RawBatch
-from src.simulation.models import LoadedMarketData, SimulationResult, SimulationWorkerPayload
-from src.simulation.service import simulate_batch, simulate_batches, simulate_loaded_data
+from src.simulation import simulate_batch, simulate_batches, simulate_loaded_data
+from src.simulation.models import LoadedMarketData, SimulationRequest, SimulationResult, SimulationWorkerPayload
 
 
 def _raw_batch(tmp_path: Path, timestamp: str = "20240101.010203") -> RawBatch:
@@ -29,16 +29,24 @@ def _result() -> SimulationResult:
 def test_simulate_loaded_data_validates_parameters() -> None:
     loaded_data = _loaded_data()
 
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match="positive finite value"):
         simulate_loaded_data(loaded_data, algorithm_name="event_balanced", time_step=0.0)
 
-    with pytest.raises(ValueError, match="must be non-negative"):
+    with pytest.raises(ValueError, match="non-negative finite value"):
         simulate_loaded_data(
             loaded_data,
             algorithm_name="event_balanced",
             time_step=0.01,
             resolved_time=-1.0,
         )
+
+
+def test_simulation_request_validates_numeric_fields() -> None:
+    with pytest.raises(ValueError, match="time_step must be a positive finite value"):
+        SimulationRequest(algorithm="event_balanced", time_step=0.0, base_tick=1e-8, resolved_time=1.0)
+
+    with pytest.raises(ValueError, match="resolved_time must be a non-negative finite value"):
+        SimulationRequest(algorithm="event_balanced", time_step=0.01, base_tick=1e-8, resolved_time=-1.0)
 
 
 def test_simulate_batch_runs_load_simulate_save_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,8 +57,8 @@ def test_simulate_batch_runs_load_simulate_save_pipeline(tmp_path: Path, monkeyp
         calls.append(f"load:{dataset.file_stem}")
         return _loaded_data()
 
-    def fake_simulate_loaded_data(loaded_data, **kwargs):
-        calls.append(f"simulate:{kwargs['algorithm_name']}")
+    def fake_run_simulation_request(request, loaded_data):
+        calls.append(f"simulate:{request.algorithm}")
         return _result()
 
     def fake_save_result(dataset, **kwargs):
@@ -58,7 +66,7 @@ def test_simulate_batch_runs_load_simulate_save_pipeline(tmp_path: Path, monkeyp
         return kwargs["output_dir"] / "saved-file.npz"
 
     monkeypatch.setattr("src.simulation.service.load_raw_dataset", fake_load_raw_dataset)
-    monkeypatch.setattr("src.simulation.service.simulate_loaded_data", fake_simulate_loaded_data)
+    monkeypatch.setattr("src.simulation.service.run_simulation_request", fake_run_simulation_request)
     monkeypatch.setattr("src.simulation.service.save_result", fake_save_result)
 
     result = simulate_batch(
@@ -75,6 +83,7 @@ def test_simulate_batch_runs_load_simulate_save_pipeline(tmp_path: Path, monkeyp
         "simulate:event_balanced",
         "save:ETH-USD-20240101.010203",
     ]
+    assert result.dataset.file_stem == "ETH-USD-20240101.010203"
 
 
 def test_simulate_batches_preserves_input_order_for_parallel_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,7 +91,7 @@ def test_simulate_batches_preserves_input_order_for_parallel_results(tmp_path: P
     second = _raw_batch(tmp_path, "20240101.010204")
 
     def fake_run_datasets_in_parallel(datasets, output_dir, request):
-        assert request.algorithm_name == "event_balanced"
+        assert request.algorithm == "event_balanced"
         return [
             SimulationWorkerPayload(
                 file_stem=f"{second.product_id}-{second.timestamp}",
@@ -105,7 +114,7 @@ def test_simulate_batches_preserves_input_order_for_parallel_results(tmp_path: P
         time_step=0.01,
     )
 
-    assert [result.raw_batch.timestamp for result in results] == [
+    assert [result.dataset.timestamp for result in results] == [
         "20240101.010203",
         "20240101.010204",
     ]

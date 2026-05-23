@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
-
 from src.plots import PLOT_REGISTRY
 from src.preprocess import PreprocessedDataset, preprocess_batches
 from src.simulation import (
+    list_algorithms,
     simulate_batches,
 )
-from src.simulation.registry import get_algorithm
 
 from .styles import COST_FILTERED_PLOT_TYPES, PLOT_PLACEHOLDER, SIMULATION_HEATMAP_PLOT_TYPES, TIMESTAMP_PLACEHOLDER, FILL_GROUP_PLACEHOLDER
 
@@ -387,33 +385,10 @@ class DashboardActionsMixin:
         """Update algorithm-specific parameter visibility."""
         self._sync_simulation_parameter_visibility()
 
-    def _algorithm_accepts_keyword(
-        self, algorithm_name: str | None, parameter_name: str
-    ) -> bool:
-        """Return whether the selected algorithm accepts a keyword argument."""
-        if not algorithm_name:
-            return False
-
-        try:
-            algorithm = get_algorithm(str(algorithm_name))
-        except ValueError:
-            return False
-
-        parameter = inspect.signature(algorithm).parameters.get(parameter_name)
-        if parameter is None:
-            return False
-
-        return parameter.kind in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-            inspect.Parameter.VAR_KEYWORD,
-        }
-
     def _sync_simulation_parameter_visibility(self) -> None:
-        """Show only the controls supported by the selected algorithm."""
-        self.simulation_time_step_input.visible = self._algorithm_accepts_keyword(
-            self.simulation_algorithm_select.value,
-            "time_step",
+        """Show controls supported by the currently registered simulation algorithms."""
+        self.simulation_time_step_input.visible = bool(
+            self.simulation_algorithm_select.value in list_algorithms()
         )
 
     def _sync_plot_options(self, *, render: bool) -> None:
