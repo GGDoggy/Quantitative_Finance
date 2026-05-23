@@ -1,30 +1,97 @@
-"""Coordinate registered preprocess builders and write dashboard-ready datasets."""
+"""Preprocess pipeline for converting raw batches into dashboard datasets."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 import tempfile
-from typing import Callable, Protocol
+from typing import Protocol
 
 import numpy as np
 
 from src.dataset_artifacts import (
+    PreprocessedArtifact as PreprocessedDataset,
     build_preprocessed_output_path,
     discover_preprocessed_artifacts,
 )
-from src.raw_batches import LoadedRawBatch, RawBatch, load_raw_batch
+from src.raw_batches import LoadedRawBatch, RawBatch, load_raw_batch, parse_timestamp
 
 from .exceptions import PreprocessOutputConflictError
-from .models import PreprocessContext, PreprocessedDataset
-from .registry import PLOT_REGISTRY
+from .orderbook import build_orderbook_payload
 
 
 DEFAULT_TIME_STEP = 0.01
 
 
+@dataclass(frozen=True)
+class PreprocessContext:
+    batch: RawBatch
+    time_step: float
+    init_rows: list[list[float]]
+    updates_rows: list[list[float]]
+    trade_rows: list[list[float]]
+
+
+@dataclass(frozen=True)
+class PreprocessBuilderSpec:
+    preprocess_builder: Callable[[PreprocessContext], dict[str, object]] | None
+    required_payload_keys: tuple[str, ...]
+
+
 class BuilderSpec(Protocol):
     preprocess_builder: Callable[[PreprocessContext], dict[str, object]] | None
     required_payload_keys: tuple[str, ...]
+
+
+def build_trade_arrays(
+    trade_rows: list[list[float]],
+    timestamp: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if not trade_rows:
+        empty_time = np.array([], dtype="datetime64[ns]")
+        empty_float = np.array([], dtype=float)
+        return empty_time, empty_float, empty_float, empty_float
+
+    start_time = parse_timestamp(timestamp)
+    midnight = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    trade_time = np.array(
+        [midnight + timedelta(seconds=row[0]) for row in trade_rows],
+        dtype="datetime64[ns]",
+    )
+    trade_price = np.array([row[1] for row in trade_rows], dtype=float)
+    trade_volume = np.array([row[2] for row in trade_rows], dtype=float)
+    trade_side = np.array([row[3] for row in trade_rows], dtype=float)
+    return trade_time, trade_price, trade_volume, trade_side
+
+
+def build_trade_payload(context: PreprocessContext) -> dict[str, object]:
+    trade_time, trade_price, trade_volume, trade_side = build_trade_arrays(
+        context.trade_rows,
+        context.batch.timestamp,
+    )
+    return {
+        "trade_time": trade_time,
+        "trade_price": trade_price,
+        "trade_volume": trade_volume,
+        "trade_side": trade_side,
+    }
+
+
+PLOT_REGISTRY: dict[str, PreprocessBuilderSpec] = {
+    "orderbook": PreprocessBuilderSpec(
+        preprocess_builder=build_orderbook_payload,
+        required_payload_keys=("price_axis", "time_axis", "data", "bid", "ask"),
+    ),
+    "trades_scatter": PreprocessBuilderSpec(
+        preprocess_builder=build_trade_payload,
+        required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
+    ),
+    "trade_volume_timeline": PreprocessBuilderSpec(
+        preprocess_builder=build_trade_payload,
+        required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
+    ),
+}
 
 
 def get_default_builder_registry() -> Mapping[str, BuilderSpec]:

@@ -1,5 +1,3 @@
-"""Dashboard-local plot registry and adapters for the current src API surface."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
@@ -7,22 +5,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.plotlib import (
+from src.preprocess import PLOT_REGISTRY, PreprocessedDataset
+
+from .orderbook import build_orderbook_view, load_orderbook_payloads
+from .simulation_heatmaps import (
     build_fill_probability_view,
     build_micro_cost_fill_probability_view,
     build_micro_profit_view,
     build_mid_cost_fill_probability_view,
     build_mid_profit_view,
-    build_orderbook_view,
+    load_simulation_arrays_from_metadata,
+)
+from .trades import (
     build_trade_volume_timeline_view,
     build_trades_scatter_view,
-)
-from src.plotlib.loaders import (
-    load_orderbook_payloads,
-    load_simulation_arrays_from_metadata,
     load_trades_payloads,
 )
-from src.preprocess import PLOT_REGISTRY, PreprocessedDataset
 
 
 PlotLoader = Callable[[Sequence[PreprocessedDataset]], Any]

@@ -11,25 +11,47 @@ from .options import (
     ProfitPlotSettings,
     SimulationHeatmapSettings,
 )
+from .orderbook import (
+    build_orderbook_view,
+    load_orderbook_payload,
+    load_orderbook_payloads,
+)
+from .registry import (
+    APP_PLOT_LABELS,
+    APP_PLOT_REGISTRY,
+    DashboardPlotSpec,
+    get_dataset_plot_types,
+    get_product_plot_types,
+    load_plot_input,
+    supports_plot_type,
+)
+from .simulation_heatmaps import (
+    build_fill_probability_view,
+    build_micro_cost_fill_probability_view,
+    build_micro_profit_view,
+    build_mid_cost_fill_probability_view,
+    build_mid_profit_view,
+    load_simulation_arrays,
+    load_simulation_arrays_from_metadata,
+)
+from .trades import (
+    build_trade_volume_timeline_view,
+    build_trades_scatter_view,
+    load_trades_payload,
+    load_trades_payloads,
+)
 from .types import (
     OrderbookPayloadV1,
     SchemaVersionV1,
     SimulationArraysV1,
     TradesPayloadV1,
 )
-from .views import (
-    build_fill_probability_view,
-    build_micro_cost_fill_probability_view,
-    build_micro_profit_view,
-    build_mid_cost_fill_probability_view,
-    build_mid_profit_view,
-    build_orderbook_view,
-    build_trade_volume_timeline_view,
-    build_trades_scatter_view,
-)
 
 __all__ = [
+    "APP_PLOT_LABELS",
+    "APP_PLOT_REGISTRY",
     "ConditionalFillProbabilityPlotSettings",
+    "DashboardPlotSpec",
     "DashboardSimulationHeatmapSettings",
     "FillProbabilityPlotSettings",
     "HeatmapAxisSettings",
@@ -53,4 +75,14 @@ __all__ = [
     "build_orderbook_view",
     "build_trade_volume_timeline_view",
     "build_trades_scatter_view",
+    "get_dataset_plot_types",
+    "get_product_plot_types",
+    "load_orderbook_payload",
+    "load_orderbook_payloads",
+    "load_plot_input",
+    "load_simulation_arrays",
+    "load_simulation_arrays_from_metadata",
+    "load_trades_payload",
+    "load_trades_payloads",
+    "supports_plot_type",
 ]

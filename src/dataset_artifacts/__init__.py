@@ -1,13 +1,14 @@
 """Preprocessed and simulation artifact naming, discovery, and locators."""
 
-from .discovery import (
-    discover_preprocessed_artifacts,
-    discover_simulation_artifacts,
-)
-from .models import DatasetLocator, PreprocessedArtifact, SimulationArtifact
-from .naming import (
+from .catalog import (
+    DatasetLocator,
+    PreprocessedArtifact,
+    SimulationArtifact,
     build_preprocessed_output_path,
     build_simulation_output_path,
+    detect_available_views,
+    discover_preprocessed_artifacts,
+    discover_simulation_artifacts,
     format_resolved_time,
     format_time_step,
     parse_preprocessed_filename,
@@ -20,6 +21,7 @@ __all__ = [
     "SimulationArtifact",
     "build_preprocessed_output_path",
     "build_simulation_output_path",
+    "detect_available_views",
     "discover_preprocessed_artifacts",
     "discover_simulation_artifacts",
     "format_resolved_time",

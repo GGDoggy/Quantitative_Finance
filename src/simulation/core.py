@@ -8,10 +8,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from .constants import DEFAULT_RESOLVED_TIME
-
-
 ALGORITHM_NAME = "time_averaged_random_cancellation"
+DEFAULT_RESOLVED_TIME = 1.0
 DEBUG_BEST_STATE = os.environ.get("DEBUG_BEST_STATE", "").lower() in {"1", "true", "yes", "on"}
 
 

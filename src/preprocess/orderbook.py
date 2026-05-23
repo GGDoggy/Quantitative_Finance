@@ -3,10 +3,12 @@ from __future__ import annotations
 import calendar
 from datetime import datetime, timedelta
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .models import PreprocessContext
+if TYPE_CHECKING:
+    from .pipeline import PreprocessContext
 
 
 def update_orderbook(orderbook: np.ndarray, price_levels: np.ndarray, price: float, volume: float, side: float) -> None:

@@ -1,4 +1,4 @@
-"""Compatibility wrappers around artifact and raw-batch discovery plus NPZ loading."""
+"""Catalog and payload helpers for dashboard-facing preprocess flows."""
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -10,11 +10,12 @@ import numpy as np
 
 from src.dataset_artifacts import (
     DatasetLocator,
+    detect_available_views as _detect_available_views,
     discover_preprocessed_artifacts,
     discover_simulation_artifacts,
     format_time_step as _format_time_step,
 )
-from src.raw_batches import discover_raw_batches as _discover_raw_batches
+from src.raw_batches import RawBatch, discover_raw_batches as _discover_raw_batches
 from src.raw_batches import parse_timestamp
 
 from .exceptions import (
@@ -22,19 +23,9 @@ from .exceptions import (
     PreprocessedDataFileError,
     PreprocessedDataSchemaError,
 )
-from .models import PlotDatasetLocator, PreprocessedDataset, RawBatch
 
-
-DEFAULT_VIEW_ORDER = (
-    "orderbook",
-    "trades_scatter",
-    "trade_volume_timeline",
-    "fill_probability",
-    "mid_profit",
-    "micro_profit",
-    "mid_fill_probability_cost",
-    "micro_fill_probability_cost",
-)
+PlotDatasetLocator = DatasetLocator
+PreprocessedDataset = object
 ViewSpecs = Sequence[tuple[str, Sequence[str]]]
 
 
@@ -49,8 +40,6 @@ def detect_available_views(
     path: Path,
     view_specs: ViewSpecs | None = None,
 ) -> tuple[str, ...]:
-    from src.dataset_artifacts.discovery import detect_available_views as _detect_available_views
-
     return _detect_available_views(path, view_specs=view_specs)
 
 
@@ -107,7 +96,7 @@ def discover_preprocessed_datasets(
         "mid_fill_probability_cost",
         "micro_fill_probability_cost",
     ),
-) -> list[PreprocessedDataset]:
+):
     return discover_preprocessed_artifacts(
         preprocessed_dir,
         view_specs=view_specs,
@@ -135,9 +124,7 @@ def discover_raw_batches(raw_dir: Path, preprocessed_dir: Path) -> list[RawBatch
     ]
 
 
-def load_preprocessed_payload(
-    dataset: PreprocessedDataset | PlotDatasetLocator,
-) -> dict[str, object]:
+def load_preprocessed_payload(dataset) -> dict[str, object]:
     path = dataset.path
     cache = dataset.payload_cache if isinstance(dataset, DatasetLocator) else None
     if cache is not None and path in cache:
@@ -153,7 +140,7 @@ def load_preprocessed_payload(
     payload["product_id"] = dataset.product_id
     payload["timestamp"] = dataset.timestamp
     payload["time_step"] = dataset.time_step
-    if isinstance(dataset, PreprocessedDataset):
+    if hasattr(dataset, "available_views"):
         payload["available_views"] = dataset.available_views
     if cache is not None:
         cache[path] = payload

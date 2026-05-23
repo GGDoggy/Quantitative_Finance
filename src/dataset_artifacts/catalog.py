@@ -1,20 +1,28 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, MutableMapping, Sequence
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import re
 import zipfile
 
 import numpy as np
 
-from .models import PreprocessedArtifact, SimulationArtifact
-from .naming import (
-    SimulationFilenameMetadata,
-    format_resolved_time,
-    format_time_step,
-    parse_preprocessed_filename,
-    parse_simulation_filename,
-)
+from src.raw_batches import parse_timestamp
 
+
+TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+_PREPROCESSED_RE = re.compile(
+    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
+    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})-orderbook_for_plot\.npz$"
+)
+_SIMULATION_RE = re.compile(
+    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
+    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})"
+    rf"(?:-resolved-(?P<resolved_time>{TIME_STEP_RE_FRAGMENT}))?"
+    r"-simulation-(?P<algorithm>.+)\.npz$"
+)
 
 DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
 DEFAULT_VIEW_ORDER = (
@@ -46,6 +54,218 @@ SIMULATION_VIEW_KEYS = (
     "micro_fill_probability_cost",
 )
 ViewSpecs = Sequence[tuple[str, Iterable[str]]]
+
+
+@dataclass(frozen=True)
+class PreprocessedFilenameMetadata:
+    product_id: str
+    timestamp: str
+    time_step: float
+    time_step_token: str
+
+
+@dataclass(frozen=True)
+class SimulationFilenameMetadata:
+    product_id: str
+    timestamp: str
+    time_step: float
+    time_step_token: str
+    resolved_time: float | None
+    resolved_time_token: str | None
+    algorithm_name: str
+
+
+@dataclass(frozen=True)
+class SimulationArtifact:
+    product_id: str
+    timestamp: str
+    time_step: float
+    algorithm_name: str
+    path: Path
+    time_step_token: str | None = None
+    resolved_time: float | None = None
+    resolved_time_token: str | None = None
+
+
+@dataclass(frozen=True)
+class PreprocessedArtifact:
+    product_id: str
+    timestamp: str
+    time_step: float
+    path: Path
+    available_views: tuple[str, ...]
+    time_step_token: str | None = None
+    simulation_artifact: SimulationArtifact | None = None
+
+    @property
+    def resolved_time(self) -> float | None:
+        return None if self.simulation_artifact is None else self.simulation_artifact.resolved_time
+
+    @property
+    def resolved_time_token(self) -> str | None:
+        return None if self.simulation_artifact is None else self.simulation_artifact.resolved_time_token
+
+    @property
+    def algorithm_name(self) -> str | None:
+        return None if self.simulation_artifact is None else self.simulation_artifact.algorithm_name
+
+    @property
+    def simulation_path(self) -> Path | None:
+        return None if self.simulation_artifact is None else self.simulation_artifact.path
+
+    @property
+    def dataset_id(self) -> str:
+        if self.simulation_artifact is not None:
+            return f"{self.path}#{self.simulation_artifact.path.name}"
+        return str(self.path)
+
+    @property
+    def display_name(self) -> str:
+        formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        views = ",".join(self.available_views)
+        simulation_suffix = (
+            f" | {self.simulation_artifact.path.stem}"
+            if self.simulation_artifact is not None
+            else ""
+        )
+        return (
+            f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s"
+            f"{simulation_suffix} | {views}"
+        )
+
+    def to_locator(
+        self,
+        preprocessed_dir: Path,
+        payload_cache: MutableMapping[Path, dict[str, object]] | None = None,
+    ) -> DatasetLocator:
+        return DatasetLocator(
+            product_id=self.product_id,
+            timestamp=self.timestamp,
+            time_step=self.time_step,
+            preprocessed_dir=preprocessed_dir,
+            time_step_token=self.time_step_token,
+            original_path=self.path,
+            simulation_artifact=self.simulation_artifact,
+            payload_cache=payload_cache,
+        )
+
+
+@dataclass(frozen=True)
+class DatasetLocator:
+    product_id: str
+    timestamp: str
+    time_step: float
+    preprocessed_dir: Path
+    time_step_token: str | None = None
+    original_path: Path | None = None
+    simulation_artifact: SimulationArtifact | None = None
+    payload_cache: MutableMapping[Path, dict[str, object]] | None = field(
+        default=None,
+        compare=False,
+        hash=False,
+        repr=False,
+    )
+
+    @property
+    def base_id(self) -> str:
+        token = self.time_step_token or format_time_step(self.time_step)
+        return f"{self.product_id}-{self.timestamp}-{token}"
+
+    @property
+    def path(self) -> Path:
+        if self.original_path is not None:
+            return self.original_path
+        return self.preprocessed_dir / f"{self.base_id}-orderbook_for_plot.npz"
+
+
+def _format_positive_decimal(value: float | str | Decimal, *, field_name: str) -> str:
+    try:
+        decimal_value = Decimal(str(value))
+    except InvalidOperation as error:
+        raise ValueError(f"Invalid {field_name}: {value!r}") from error
+
+    if not decimal_value.is_finite() or decimal_value <= 0:
+        raise ValueError(f"{field_name} must be a positive finite value: {value!r}")
+
+    normalized = decimal_value.normalize()
+    if normalized == normalized.to_integral():
+        return format(normalized, "f")
+    return format(normalized, "f").rstrip("0").rstrip(".")
+
+
+def format_time_step(time_step: float | str | Decimal) -> str:
+    return _format_positive_decimal(time_step, field_name="time step")
+
+
+def format_resolved_time(resolved_time: float | str | Decimal) -> str:
+    try:
+        decimal_value = Decimal(str(resolved_time))
+    except InvalidOperation as error:
+        raise ValueError(f"Invalid resolved time: {resolved_time!r}") from error
+
+    if not decimal_value.is_finite() or decimal_value < 0:
+        raise ValueError(
+            f"resolved time must be a non-negative finite value: {resolved_time!r}"
+        )
+
+    normalized = decimal_value.normalize()
+    if normalized == normalized.to_integral():
+        return format(normalized, "f")
+    return format(normalized, "f").rstrip("0").rstrip(".")
+
+
+def parse_preprocessed_filename(filename: str) -> PreprocessedFilenameMetadata | None:
+    match = _PREPROCESSED_RE.match(filename)
+    if match is None:
+        return None
+    return PreprocessedFilenameMetadata(
+        product_id=match.group("product_id"),
+        timestamp=match.group("timestamp"),
+        time_step=float(match.group("time_step")),
+        time_step_token=match.group("time_step"),
+    )
+
+
+def parse_simulation_filename(filename: str) -> SimulationFilenameMetadata | None:
+    match = _SIMULATION_RE.match(filename)
+    if match is None:
+        return None
+    resolved_time_token = match.group("resolved_time")
+    return SimulationFilenameMetadata(
+        product_id=match.group("product_id"),
+        timestamp=match.group("timestamp"),
+        time_step=float(match.group("time_step")),
+        time_step_token=match.group("time_step"),
+        resolved_time=float(resolved_time_token) if resolved_time_token is not None else None,
+        resolved_time_token=resolved_time_token,
+        algorithm_name=match.group("algorithm"),
+    )
+
+
+def build_preprocessed_output_path(
+    output_dir: Path | str,
+    product_id: str,
+    timestamp: str,
+    time_step: float,
+) -> Path:
+    token = format_time_step(time_step)
+    return Path(output_dir) / f"{product_id}-{timestamp}-{token}-orderbook_for_plot.npz"
+
+
+def build_simulation_output_path(
+    output_dir: Path | str,
+    product_id: str,
+    timestamp: str,
+    time_step: float,
+    algorithm_name: str,
+    resolved_time: float,
+) -> Path:
+    time_step_token = format_time_step(time_step)
+    resolved_time_token = format_resolved_time(resolved_time)
+    return (
+        Path(output_dir)
+        / f"{product_id}-{timestamp}-{time_step_token}-resolved-{resolved_time_token}-simulation-{algorithm_name}.npz"
+    )
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:

@@ -5,8 +5,7 @@ import numpy as np
 from src.dataset_artifacts import build_simulation_output_path
 from src.preprocess import PLOT_REGISTRY, preprocess_batch
 from src.raw_batches import discover_raw_batches
-from src.simulation import SimulationRequest, load_raw_dataset
-from src.simulation.io import build_output_path
+from src.simulation import SimulationRequest, build_output_path, load_raw_dataset
 
 
 def _write(path: Path, content: str) -> None:
