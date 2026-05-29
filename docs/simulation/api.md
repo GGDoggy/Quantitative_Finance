@@ -27,6 +27,7 @@
 - `time_step`
 - `base_tick`
 - `resolved_time`
+- `order_depth`（預設 `1`）
 
 驗證規則：
 
@@ -34,6 +35,7 @@
 - `time_step` 必須是正的有限值
 - `base_tick` 必須是正的有限值
 - `resolved_time` 必須是非負有限值
+- `order_depth` 必須是正整數；`1` 保持既有 best-only 模擬，相容既有輸出與測試
 
 ## `SimulationResult`
 
@@ -85,6 +87,7 @@ request = SimulationRequest(
     time_step=DEFAULT_TIME_STEP,
     base_tick=DEFAULT_BASE_TICK,
     resolved_time=DEFAULT_RESOLVED_TIME,
+    order_depth=1,
 )
 result = simulate_batch(batches[0], request, Path("data/preprocessed"))
 print(result.output_path)

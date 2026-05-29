@@ -129,6 +129,7 @@ def _run_simulation(
             time_step=request.time_step,
             base_tick=request.base_tick,
             resolved_time=request.resolved_time,
+            order_depth=request.order_depth,
         )
     )
 

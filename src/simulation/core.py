@@ -223,6 +223,69 @@ def get_best_levels_from_indices(orderbook, price_levels, best_bid_index, best_a
     return best_bid_price, best_bid_size, best_ask_price, best_ask_size
 
 
+def iter_bid_depth_levels(orderbook, price_levels, best_bid_index, depth):
+    if best_bid_index is None or depth <= 0:
+        return
+
+    emitted = 0
+    for price_index in range(best_bid_index, -1, -1):
+        raw_size = orderbook[price_index]
+        if raw_size >= 0:
+            continue
+        yield (price_index, float(price_levels[price_index]), float(-raw_size))
+        emitted += 1
+        if emitted >= depth:
+            break
+
+
+def iter_ask_depth_levels(orderbook, price_levels, best_ask_index, depth):
+    if best_ask_index is None or depth <= 0:
+        return
+
+    emitted = 0
+    for price_index in range(best_ask_index, len(orderbook)):
+        raw_size = orderbook[price_index]
+        if raw_size <= 0:
+            continue
+        yield (price_index, float(price_levels[price_index]), float(raw_size))
+        emitted += 1
+        if emitted >= depth:
+            break
+
+
+def append_depth_orders_for_side(
+    orders_by_price,
+    book_side,
+    orderbook,
+    price_levels,
+    best_index,
+    opposite_best_size,
+    spread,
+    submit_time,
+    base_tick,
+    order_depth=1,
+):
+    depth_levels = (
+        iter_bid_depth_levels(orderbook, price_levels, best_index, order_depth)
+        if book_side == "bid"
+        else iter_ask_depth_levels(orderbook, price_levels, best_index, order_depth)
+    )
+    orders = []
+    for price_index, price, near_size in depth_levels:
+        order = create_virtual_order(
+            near_size,
+            opposite_best_size,
+            spread,
+            submit_time,
+            price,
+            base_tick,
+        )
+        if order is not None:
+            get_orders_bucket(orders_by_price, price_index).append(order)
+            orders.append(order)
+    return orders
+
+
 def debug_best_state(
     stage,
     orderbook,
@@ -808,6 +871,7 @@ def simulate_virtual_best_orders(
     time_step,
     base_tick,
     resolved_time=DEFAULT_RESOLVED_TIME,
+    order_depth=1,
 ):
     price_levels = {level[0] for level in init}
     price_levels.update(update[1] for update in updates)
@@ -1009,27 +1073,31 @@ def simulate_virtual_best_orders(
             event_type="submit",
         )
 
-        bid_order = create_virtual_order(
-            best_bid_size,
+        spread = compute_bid_ask_spread(best_bid_price, best_ask_price)
+        append_depth_orders_for_side(
+            bid_orders_by_price,
+            "bid",
+            orderbook,
+            price_levels,
+            best_bid_index,
             best_ask_size,
-            compute_bid_ask_spread(best_bid_price, best_ask_price),
+            spread,
             next_submit_time,
-            best_bid_price,
             base_tick,
+            order_depth,
         )
-        if bid_order is not None:
-            get_orders_bucket(bid_orders_by_price, best_bid_index).append(bid_order)
-
-        ask_order = create_virtual_order(
-            best_ask_size,
+        append_depth_orders_for_side(
+            ask_orders_by_price,
+            "ask",
+            orderbook,
+            price_levels,
+            best_ask_index,
             best_bid_size,
-            compute_bid_ask_spread(best_bid_price, best_ask_price),
+            spread,
             next_submit_time,
-            best_ask_price,
             base_tick,
+            order_depth,
         )
-        if ask_order is not None:
-            get_orders_bucket(ask_orders_by_price, best_ask_index).append(ask_order)
 
         next_submit_time += time_step
 
