@@ -118,6 +118,8 @@ def test_service_passes_order_depth_to_registered_algorithm():
 
     assert result.bid_prices.tolist() == [99.0, 97.0, 96.0]
     assert result.ask_prices.tolist() == [101.0, 103.0, 104.0]
+    assert result.bid_depth.tolist() == [1, 2, 3]
+    assert result.ask_depth.tolist() == [1, 2, 3]
 
 
 @pytest.mark.parametrize("order_depth", [0, -1, 1.5, True])
@@ -164,3 +166,109 @@ def test_best_size_changed_accepts_depth_parameter_for_initial_submit():
 
     assert output[0].tolist() == [99.0, 97.0, 96.0]
     assert output[9].tolist() == [101.0, 103.0, 104.0]
+
+
+def test_deeper_order_is_not_cancelled_until_its_price_becomes_and_leaves_best():
+    init = [
+        [98.0, 5.0, 1],
+        [99.0, 2.0, 1],
+        [101.0, 3.0, -1],
+    ]
+    updates = [
+        [0.0, 99.0, 2.0, 1],
+        [2.0, 99.0, 0.0, 1],
+        [4.0, 100.0, 1.0, 1],
+        [10.0, 101.0, 3.0, -1],
+    ]
+    trades = [
+        [0.0, 99.0, 0.1, 1],
+        [10.0, 101.0, 0.1, -1],
+    ]
+
+    output = simulate_virtual_best_orders(
+        init,
+        updates,
+        trades,
+        start_time=0.0,
+        time_step=10.0,
+        base_tick=0.01,
+        resolved_time=1.0,
+        order_depth=2,
+    )
+
+    bid_prices = output[0]
+    bid_result = output[7]
+    bid_survival_time = output[3]
+    bid_depth = output[26]
+
+    assert bid_prices.tolist() == [99.0, 98.0]
+    assert bid_depth.tolist() == [1, 2]
+    assert bid_result.tolist() == [0, 0]
+    assert bid_survival_time.tolist() == [1.0, 3.0]
+
+
+def test_deeper_order_removed_before_becoming_best_is_left_unresolved():
+    init = [
+        [98.0, 5.0, 1],
+        [99.0, 2.0, 1],
+        [101.0, 3.0, -1],
+    ]
+    updates = [
+        [0.0, 99.0, 2.0, 1],
+        [2.0, 98.0, 0.0, 1],
+        [10.0, 101.0, 3.0, -1],
+    ]
+    trades = [
+        [0.0, 99.0, 0.1, 1],
+        [10.0, 101.0, 0.1, -1],
+    ]
+
+    output = simulate_virtual_best_orders(
+        init,
+        updates,
+        trades,
+        start_time=0.0,
+        time_step=10.0,
+        base_tick=0.01,
+        resolved_time=1.0,
+        order_depth=2,
+    )
+
+    assert output[0].tolist() == [99.0, 98.0]
+    assert output[7].tolist() == [-1, -1]
+    assert output[26].tolist() == [1, 2]
+
+
+def test_deeper_order_is_filled_by_trade_through_before_next_book_update():
+    init = [
+        [98.0, 5.0, 1],
+        [99.0, 2.0, 1],
+        [101.0, 3.0, -1],
+        [102.0, 4.0, -1],
+    ]
+    updates = [
+        [0.0, 99.0, 2.0, 1],
+        [3.0, 102.0, 4.5, -1],
+        [10.0, 101.0, 3.0, -1],
+    ]
+    trades = [
+        [0.0, 99.0, 0.1, 1],
+        [2.0, 98.0, 6.0, 1],
+        [10.0, 101.0, 0.1, -1],
+    ]
+
+    output = simulate_virtual_best_orders(
+        init,
+        updates,
+        trades,
+        start_time=0.0,
+        time_step=10.0,
+        base_tick=0.01,
+        resolved_time=1.0,
+        order_depth=2,
+    )
+
+    assert output[0].tolist() == [99.0, 98.0]
+    assert output[7].tolist() == [1, 1]
+    assert output[3].tolist()[1] == 1.0
+    assert output[26].tolist() == [1, 2]

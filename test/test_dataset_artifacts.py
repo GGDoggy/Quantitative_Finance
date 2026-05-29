@@ -33,6 +33,8 @@ def test_build_and_parse_paths_round_trip(tmp_path: Path) -> None:
     assert simulation_metadata is not None
     assert simulation_metadata.algorithm_name == "event_balanced"
     assert simulation_metadata.resolved_time == 1.0
+    assert simulation_metadata.order_depth == 1
+    assert "-depth-1-" in simulation.name
 
 
 def test_discovery_matches_existing_orderbook_and_simulation_files(tmp_path: Path) -> None:
@@ -49,7 +51,7 @@ def test_discovery_matches_existing_orderbook_and_simulation_files(tmp_path: Pat
         available_views=np.array(["orderbook", "trades_scatter"]),
     )
     simulation_path = build_simulation_output_path(
-        tmp_path, "ETH-USD", "20260523.120000", 0.01, "event_balanced", 1.0
+        tmp_path, "ETH-USD", "20260523.120000", 0.01, "event_balanced", 1.0, 3
     )
     np.savez_compressed(
         simulation_path,
@@ -77,3 +79,14 @@ def test_discovery_matches_existing_orderbook_and_simulation_files(tmp_path: Pat
     assert preprocessed_artifacts[0].simulation_path == simulation_path
     assert len(simulation_artifacts) == 1
     assert simulation_artifacts[0].path == simulation_path
+    assert simulation_artifacts[0].order_depth == 3
+
+
+def test_parse_legacy_simulation_filename_without_depth() -> None:
+    metadata = parse_simulation_filename(
+        "ETH-USD-20260523.120000-0.01-resolved-1-simulation-event_balanced.npz"
+    )
+
+    assert metadata is not None
+    assert metadata.order_depth is None
+    assert metadata.algorithm_name == "event_balanced"

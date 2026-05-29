@@ -52,6 +52,8 @@ SIMULATION_RESULT_KEYS = (
     "ask_micro_price",
     "ask_mid_profit",
     "ask_micro_profit",
+    "bid_depth",
+    "ask_depth",
 )
 
 
@@ -62,6 +64,7 @@ def build_output_path(
     time_step: float,
     algorithm_name: str,
     resolved_time: float,
+    order_depth: int = 1,
 ) -> Path:
     return build_simulation_output_path(
         output_path,
@@ -70,6 +73,7 @@ def build_output_path(
         time_step,
         algorithm_name,
         resolved_time,
+        order_depth,
     )
 
 
@@ -99,6 +103,7 @@ def save_result_file(
     time_step: float,
     base_tick: float,
     resolved_time: float,
+    order_depth: int,
     result: SimulationResult,
 ) -> Path:
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +114,7 @@ def save_result_file(
         "time_step": time_step,
         "base_tick": base_tick,
         "resolved_time": resolved_time,
+        "order_depth": order_depth,
     }
     save_kwargs.update(serialize_result_for_npz(result))
     np.savez_compressed(output_file, **save_kwargs)
@@ -147,6 +153,7 @@ def _save_result(
         request.time_step,
         request.algorithm,
         request.resolved_time,
+        request.order_depth,
     )
     return save_result_file(
         output_file,
@@ -155,6 +162,7 @@ def _save_result(
         time_step=request.time_step,
         base_tick=request.base_tick,
         resolved_time=request.resolved_time,
+        order_depth=request.order_depth,
         result=result,
     )
 
@@ -178,6 +186,7 @@ def simulate_batch(
         request.time_step,
         request.algorithm,
         request.resolved_time,
+        request.order_depth,
     )
     overwritten = output_path.exists()
     loaded_data = load_raw_dataset(dataset)
@@ -207,6 +216,7 @@ def _process_dataset_job(
         request.time_step,
         request.algorithm,
         request.resolved_time,
+        request.order_depth,
     )
     overwritten = output_file.exists()
     loaded_data = load_raw_dataset(dataset)

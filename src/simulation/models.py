@@ -1,7 +1,7 @@
 """Core data models for the simulation library."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 
@@ -46,9 +46,17 @@ class SimulationResult:
     ask_micro_price: np.ndarray
     ask_mid_profit: np.ndarray
     ask_micro_profit: np.ndarray
+    bid_depth: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
+    ask_depth: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
 
     @classmethod
     def from_algorithm_output(cls, values: tuple[np.ndarray, ...]) -> "SimulationResult":
+        if len(values) == 26:
+            values = (
+                *values,
+                np.ones(len(values[0]), dtype=int),
+                np.ones(len(values[9]), dtype=int),
+            )
         return cls(*values)
 
     def as_tuple(self) -> tuple[np.ndarray, ...]:
@@ -79,6 +87,8 @@ class SimulationResult:
             self.ask_micro_price,
             self.ask_mid_profit,
             self.ask_micro_profit,
+            self.bid_depth,
+            self.ask_depth,
         )
 
 

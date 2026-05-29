@@ -27,13 +27,13 @@ ETH-USD-20240501.120000-0.01-orderbook_for_plot.npz
 ### Simulation dataset
 
 ```text
-{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm_name}.npz
+{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-depth-{order_depth}-simulation-{algorithm_name}.npz
 ```
 
 例子：
 
 ```text
-ETH-USD-20240501.120000-0.01-resolved-1-simulation-event_balanced.npz
+ETH-USD-20240501.120000-0.01-resolved-1-depth-3-simulation-event_balanced.npz
 ```
 
 ## Public API
@@ -60,6 +60,7 @@ ETH-USD-20240501.120000-0.01-resolved-1-simulation-event_balanced.npz
 - `time_step_token`
 - `resolved_time`
 - `resolved_time_token`
+- `order_depth`
 
 ### `PreprocessedArtifact`
 

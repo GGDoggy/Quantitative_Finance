@@ -5,7 +5,7 @@
 ### 函式
 
 - `list_algorithms() -> list[str]`
-- `build_output_path(output_path, product_id, timestamp, time_step, algorithm_name, resolved_time) -> Path`
+- `build_output_path(output_path, product_id, timestamp, time_step, algorithm_name, resolved_time, order_depth=1) -> Path`
 - `parse_dataset_groups(data_v3_path) -> list[RawBatch]`
 - `load_raw_dataset(dataset: RawBatch) -> LoadedMarketData`
 - `simulate_loaded_data(data: LoadedMarketData, request: SimulationRequest) -> SimulationResult`
@@ -46,6 +46,7 @@
   - `bid_near_size`, `ask_near_size`
   - `bid_opp_size`, `ask_opp_size`
   - `bid_spread`, `ask_spread`
+  - `bid_depth`, `ask_depth`
 - queue 狀態
   - `bid_ahead`, `ask_ahead`
   - `bid_behind`, `ask_behind`

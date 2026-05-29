@@ -3,7 +3,7 @@
 這份文件描述 simulation `.npz` 的輸出格式，也就是：
 
 ```text
-{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm_name}.npz
+{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-depth-{order_depth}-simulation-{algorithm_name}.npz
 ```
 
 ## Metadata keys
@@ -16,6 +16,7 @@
 - `time_step`
 - `base_tick`
 - `resolved_time`
+- `order_depth`
 
 ## Array keys
 
@@ -30,6 +31,7 @@
 - `bid_vorder_ratio`
 - `bid_result`
 - `bid_spread`
+- `bid_depth`
 - `ask_prices`
 - `ask_near_size`
 - `ask_opp_size`
@@ -39,6 +41,7 @@
 - `ask_vorder_ratio`
 - `ask_result`
 - `ask_spread`
+- `ask_depth`
 - `bid_mid_price`
 - `bid_micro_price`
 - `bid_mid_profit`
@@ -62,6 +65,8 @@
 - `ask_mid_profit`
 - `ask_micro_profit`
 - `ask_result`
+
+`bid_depth` / `ask_depth` record the 1-based book depth level used when each virtual order was created, so depth-aware runs can be audited after loading the artifact.
 
 這表示：
 

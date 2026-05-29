@@ -21,6 +21,7 @@ _SIMULATION_RE = re.compile(
     r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
     rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})"
     rf"(?:-resolved-(?P<resolved_time>{TIME_STEP_RE_FRAGMENT}))?"
+    r"(?:-depth-(?P<order_depth>\d+))?"
     r"-simulation-(?P<algorithm>.+)\.npz$"
 )
 
@@ -73,6 +74,7 @@ class SimulationFilenameMetadata:
     resolved_time: float | None
     resolved_time_token: str | None
     algorithm_name: str
+    order_depth: int | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,7 @@ class SimulationArtifact:
     time_step_token: str | None = None
     resolved_time: float | None = None
     resolved_time_token: str | None = None
+    order_depth: int | None = None
 
 
 @dataclass(frozen=True)
@@ -239,6 +242,7 @@ def parse_simulation_filename(filename: str) -> SimulationFilenameMetadata | Non
         resolved_time=float(resolved_time_token) if resolved_time_token is not None else None,
         resolved_time_token=resolved_time_token,
         algorithm_name=match.group("algorithm"),
+        order_depth=int(match.group("order_depth")) if match.group("order_depth") is not None else None,
     )
 
 
@@ -259,12 +263,15 @@ def build_simulation_output_path(
     time_step: float,
     algorithm_name: str,
     resolved_time: float,
+    order_depth: int = 1,
 ) -> Path:
+    if type(order_depth) is not int or order_depth <= 0:
+        raise ValueError(f"order_depth must be a positive integer: {order_depth!r}")
     time_step_token = format_time_step(time_step)
     resolved_time_token = format_resolved_time(resolved_time)
     return (
         Path(output_dir)
-        / f"{product_id}-{timestamp}-{time_step_token}-resolved-{resolved_time_token}-simulation-{algorithm_name}.npz"
+        / f"{product_id}-{timestamp}-{time_step_token}-resolved-{resolved_time_token}-depth-{order_depth}-simulation-{algorithm_name}.npz"
     )
 
 
@@ -391,6 +398,7 @@ def discover_simulation_artifacts(
                 time_step_token=metadata.time_step_token,
                 resolved_time=metadata.resolved_time,
                 resolved_time_token=metadata.resolved_time_token,
+                order_depth=metadata.order_depth,
             )
         )
     return tuple(sorted(artifacts, key=lambda artifact: artifact.path.name))
@@ -466,6 +474,7 @@ def discover_preprocessed_artifacts(
                     time_step_token=simulation_metadata.time_step_token,
                     resolved_time=simulation_metadata.resolved_time,
                     resolved_time_token=simulation_metadata.resolved_time_token,
+                    order_depth=simulation_metadata.order_depth,
                 )
             )
 

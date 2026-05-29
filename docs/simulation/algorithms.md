@@ -48,6 +48,9 @@ algorithm(
 - bid 端從 best bid index 開始往較低價格掃描，ask 端從 best ask index 開始往較高價格掃描。
 - 只會在該側 orderbook size 有效的價位建立虛擬訂單，因此空洞價位與 size 為 0 的 level 會被略過。
 - 每筆 depth order 都放入自己的 `orders_by_price[price_index]` bucket，後續 reconciliation / trade volume / finalize 流程可依價格 bucket 處理。
+- 每筆輸出會透過 `bid_depth` / `ask_depth` 記錄建立該虛擬訂單時的 1-based depth。
+- 非 best 的 book-inside depth order 不會只因自己的價位先被移除就取消；當它的價格後續成為 best 後，才會在 best price 離開該價格時取消。
+- 穿越該價格的 trade evidence 仍會依價格 bucket reconcile，讓 book-inside depth order 可以被成交。
 - 目前 depth order 的 `opp_size` 沿用對手方 best size，而不是同 depth 對手方 level size。
 
 三個演算法都建立在 `src.simulation.core` 內的共用工具之上，例如：

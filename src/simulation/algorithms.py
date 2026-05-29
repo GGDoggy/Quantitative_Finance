@@ -18,7 +18,7 @@ from .core import (
     finalize_unresolved,
     get_best_levels_from_indices,
     initialize_best_indices,
-    reconcile_one_side,
+    reconcile_depth_side,
     record_best_quote,
     side_to_trade_key,
     simulate_virtual_best_orders as simulate_time_averaged_random_cancellation,
@@ -288,8 +288,7 @@ def simulate_best_size_changed(
                     best_bid_size,
                     best_ask_price,
                     best_ask_size,
-                    best_bid_index,
-                    best_ask_index,
+                    orderbook.copy(),
                 )
 
             updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
@@ -338,30 +337,27 @@ def simulate_best_size_changed(
                 previous_bid_size,
                 previous_ask_price,
                 previous_ask_size,
-                previous_bid_index,
-                previous_ask_index,
+                previous_orderbook,
             ) = pending_update_reference
             pending_update_reference = None
 
-            bid_consumed = reconcile_one_side(
+            bid_consumed = reconcile_depth_side(
                 "bid",
                 bid_orders_by_price,
-                previous_bid_index,
-                previous_bid_price,
-                previous_bid_size,
-                current_bid_price,
-                current_bid_size,
+                price_levels,
+                previous_orderbook,
+                orderbook,
+                best_bid_index,
                 pending_trade_evidence["bid"],
                 event_time,
             )
-            ask_consumed = reconcile_one_side(
+            ask_consumed = reconcile_depth_side(
                 "ask",
                 ask_orders_by_price,
-                previous_ask_index,
-                previous_ask_price,
-                previous_ask_size,
-                current_ask_price,
-                current_ask_size,
+                price_levels,
+                previous_orderbook,
+                orderbook,
+                best_ask_index,
                 pending_trade_evidence["ask"],
                 event_time,
             )
@@ -518,8 +514,10 @@ def simulate_best_size_changed(
     return (
         *bid_output[:9],
         *ask_output[:9],
-        *bid_output[9:],
-        *ask_output[9:],
+        *bid_output[9:13],
+        *ask_output[9:13],
+        bid_output[13],
+        ask_output[13],
     )
 
 
@@ -656,8 +654,7 @@ def simulate_event_balanced(
                     best_bid_size,
                     best_ask_price,
                     best_ask_size,
-                    best_bid_index,
-                    best_ask_index,
+                    orderbook.copy(),
                 )
 
             updated_index, _updated_value = update_orderbook(orderbook, price_levels, event_price, event_volume, event_side)
@@ -706,30 +703,27 @@ def simulate_event_balanced(
                 previous_bid_size,
                 previous_ask_price,
                 previous_ask_size,
-                previous_bid_index,
-                previous_ask_index,
+                previous_orderbook,
             ) = pending_update_reference
             pending_update_reference = None
 
-            bid_consumed = reconcile_one_side(
+            bid_consumed = reconcile_depth_side(
                 "bid",
                 bid_orders_by_price,
-                previous_bid_index,
-                previous_bid_price,
-                previous_bid_size,
-                current_bid_price,
-                current_bid_size,
+                price_levels,
+                previous_orderbook,
+                orderbook,
+                best_bid_index,
                 pending_trade_evidence["bid"],
                 event_time,
             )
-            ask_consumed = reconcile_one_side(
+            ask_consumed = reconcile_depth_side(
                 "ask",
                 ask_orders_by_price,
-                previous_ask_index,
-                previous_ask_price,
-                previous_ask_size,
-                current_ask_price,
-                current_ask_size,
+                price_levels,
+                previous_orderbook,
+                orderbook,
+                best_ask_index,
                 pending_trade_evidence["ask"],
                 event_time,
             )
@@ -863,8 +857,10 @@ def simulate_event_balanced(
     return (
         *bid_output[:9],
         *ask_output[:9],
-        *bid_output[9:],
-        *ask_output[9:],
+        *bid_output[9:13],
+        *ask_output[9:13],
+        bid_output[13],
+        ask_output[13],
     )
 
 
