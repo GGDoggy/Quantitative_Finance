@@ -5,7 +5,7 @@
 ### 函式
 
 - `list_algorithms() -> list[str]`
-- `build_output_path(output_path, product_id, timestamp, time_step, algorithm_name, resolved_time) -> Path`
+- `build_output_path(output_path, algorithm_name, simulation_timestamp) -> Path`
 - `parse_dataset_groups(data_v3_path) -> list[RawBatch]`
 - `load_raw_dataset(dataset: RawBatch) -> LoadedMarketData`
 - `simulate_loaded_data(data: LoadedMarketData, request: SimulationRequest) -> SimulationResult`

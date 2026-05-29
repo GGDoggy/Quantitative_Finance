@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, MutableMapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -18,13 +18,22 @@ _PREPROCESSED_RE = re.compile(
     rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})-orderbook_for_plot\.npz$"
 )
 _SIMULATION_RE = re.compile(
-    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
-    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})"
-    rf"(?:-resolved-(?P<resolved_time>{TIME_STEP_RE_FRAGMENT}))?"
-    r"-simulation-(?P<algorithm>.+)\.npz$"
+    r"^simulation-(?P<algorithm>.+)-(?P<simulation_timestamp>\d{8}\.\d{6}\.\d{3})\.npz$"
 )
 
 DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
+SIMULATION_TIMESTAMP_RE = re.compile(r"^\d{8}\.\d{6}\.\d{3}$")
+SIMULATION_METADATA_REQUIRED_KEYS = (
+    "algorithm",
+    "simulation_timestamp",
+    "product_id",
+    "timestamp",
+    "file_stem",
+    "time_step",
+    "base_tick",
+    "resolved_time",
+    "depth",
+)
 DEFAULT_VIEW_ORDER = (
     "orderbook",
     "trades_scatter",
@@ -66,13 +75,8 @@ class PreprocessedFilenameMetadata:
 
 @dataclass(frozen=True)
 class SimulationFilenameMetadata:
-    product_id: str
-    timestamp: str
-    time_step: float
-    time_step_token: str
-    resolved_time: float | None
-    resolved_time_token: str | None
     algorithm_name: str
+    simulation_timestamp: str
 
 
 @dataclass(frozen=True)
@@ -82,9 +86,10 @@ class SimulationArtifact:
     time_step: float
     algorithm_name: str
     path: Path
+    simulation_timestamp: str
     time_step_token: str | None = None
     resolved_time: float | None = None
-    resolved_time_token: str | None = None
+    depth: int | None = None
 
 
 @dataclass(frozen=True)
@@ -103,7 +108,9 @@ class PreprocessedArtifact:
 
     @property
     def resolved_time_token(self) -> str | None:
-        return None if self.simulation_artifact is None else self.simulation_artifact.resolved_time_token
+        if self.simulation_artifact is None or self.simulation_artifact.resolved_time is None:
+            return None
+        return format_resolved_time(self.simulation_artifact.resolved_time)
 
     @property
     def algorithm_name(self) -> str | None:
@@ -230,15 +237,9 @@ def parse_simulation_filename(filename: str) -> SimulationFilenameMetadata | Non
     match = _SIMULATION_RE.match(filename)
     if match is None:
         return None
-    resolved_time_token = match.group("resolved_time")
     return SimulationFilenameMetadata(
-        product_id=match.group("product_id"),
-        timestamp=match.group("timestamp"),
-        time_step=float(match.group("time_step")),
-        time_step_token=match.group("time_step"),
-        resolved_time=float(resolved_time_token) if resolved_time_token is not None else None,
-        resolved_time_token=resolved_time_token,
         algorithm_name=match.group("algorithm"),
+        simulation_timestamp=match.group("simulation_timestamp"),
     )
 
 
@@ -254,18 +255,15 @@ def build_preprocessed_output_path(
 
 def build_simulation_output_path(
     output_dir: Path | str,
-    product_id: str,
-    timestamp: str,
-    time_step: float,
     algorithm_name: str,
-    resolved_time: float,
+    simulation_timestamp: str,
 ) -> Path:
-    time_step_token = format_time_step(time_step)
-    resolved_time_token = format_resolved_time(resolved_time)
-    return (
-        Path(output_dir)
-        / f"{product_id}-{timestamp}-{time_step_token}-resolved-{resolved_time_token}-simulation-{algorithm_name}.npz"
-    )
+    if SIMULATION_TIMESTAMP_RE.match(simulation_timestamp) is None:
+        raise ValueError(
+            "simulation_timestamp must match YYYYMMDD.HHMMSS.mmm: "
+            f"{simulation_timestamp!r}"
+        )
+    return Path(output_dir) / f"simulation-{algorithm_name}-{simulation_timestamp}.npz"
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
@@ -333,7 +331,7 @@ def _matches_numeric_token(
 
 
 def _matches_resolved_time(
-    metadata: SimulationFilenameMetadata,
+    metadata: SimulationArtifact,
     resolved_time: float | None,
     resolved_time_token: str | None,
 ) -> bool:
@@ -345,8 +343,80 @@ def _matches_resolved_time(
     if resolved_time_token is not None:
         expected_tokens.add(resolved_time_token)
     return (
-        metadata.resolved_time_token in expected_tokens
+        format_resolved_time(metadata.resolved_time) in expected_tokens
         or metadata.resolved_time == resolved_time
+    )
+
+
+def _load_npz_fields(path: Path, required_keys: Iterable[str]) -> dict[str, object]:
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            missing_keys = [key for key in required_keys if key not in data.files]
+            if missing_keys:
+                raise ValueError(
+                    f"missing required key(s): {', '.join(sorted(missing_keys))}"
+                )
+            return {key: data[key].tolist() for key in required_keys}
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise ValueError(f"Failed to load simulation metadata from {path.name}: {error}") from error
+
+
+def _read_required_str(metadata: Mapping[str, object], field_name: str) -> str:
+    value = metadata.get(field_name)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Invalid simulation metadata field {field_name!r}: {value!r}")
+    return value
+
+
+def _read_required_float(metadata: Mapping[str, object], field_name: str) -> float:
+    value = metadata.get(field_name)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"Invalid simulation metadata field {field_name!r}: {value!r}"
+        ) from error
+    if not np.isfinite(numeric):
+        raise ValueError(f"Simulation metadata field {field_name!r} must be finite.")
+    return numeric
+
+
+def _read_required_int(metadata: Mapping[str, object], field_name: str) -> int:
+    value = metadata.get(field_name)
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"Invalid simulation metadata field {field_name!r}: {value!r}"
+        ) from error
+    return numeric
+
+
+def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
+    filename_metadata = parse_simulation_filename(path.name)
+    if filename_metadata is None:
+        return None
+    metadata = _load_npz_fields(path, SIMULATION_METADATA_REQUIRED_KEYS)
+    algorithm_name = _read_required_str(metadata, "algorithm")
+    simulation_timestamp = _read_required_str(metadata, "simulation_timestamp")
+    if algorithm_name != filename_metadata.algorithm_name:
+        raise ValueError(
+            f"Simulation metadata algorithm does not match filename for {path.name}."
+        )
+    if simulation_timestamp != filename_metadata.simulation_timestamp:
+        raise ValueError(
+            f"Simulation metadata timestamp does not match filename for {path.name}."
+        )
+    return SimulationArtifact(
+        product_id=_read_required_str(metadata, "product_id"),
+        timestamp=_read_required_str(metadata, "timestamp"),
+        time_step=_read_required_float(metadata, "time_step"),
+        algorithm_name=algorithm_name,
+        path=path,
+        simulation_timestamp=simulation_timestamp,
+        time_step_token=format_time_step(_read_required_float(metadata, "time_step")),
+        resolved_time=_read_required_float(metadata, "resolved_time"),
+        depth=_read_required_int(metadata, "depth"),
     )
 
 
@@ -363,36 +433,25 @@ def discover_simulation_artifacts(
 ) -> tuple[SimulationArtifact, ...]:
     artifacts: list[SimulationArtifact] = []
     for path in _iter_files(Path(preprocessed_dir), ".npz"):
-        metadata = parse_simulation_filename(path.name)
-        if metadata is None:
+        artifact = _load_simulation_artifact(path)
+        if artifact is None:
             continue
-        if product_id is not None and metadata.product_id != product_id:
+        if product_id is not None and artifact.product_id != product_id:
             continue
-        if timestamp is not None and metadata.timestamp != timestamp:
+        if timestamp is not None and artifact.timestamp != timestamp:
             continue
         if time_step is not None and not _matches_numeric_token(
-            metadata.time_step,
-            metadata.time_step_token,
+            artifact.time_step,
+            artifact.time_step_token or format_time_step(artifact.time_step),
             time_step,
             explicit_token=time_step_token,
         ):
             continue
-        if algorithm_name is not None and metadata.algorithm_name != algorithm_name:
+        if algorithm_name is not None and artifact.algorithm_name != algorithm_name:
             continue
-        if not _matches_resolved_time(metadata, resolved_time, resolved_time_token):
+        if not _matches_resolved_time(artifact, resolved_time, resolved_time_token):
             continue
-        artifacts.append(
-            SimulationArtifact(
-                product_id=metadata.product_id,
-                timestamp=metadata.timestamp,
-                time_step=metadata.time_step,
-                algorithm_name=metadata.algorithm_name,
-                path=path,
-                time_step_token=metadata.time_step_token,
-                resolved_time=metadata.resolved_time,
-                resolved_time_token=metadata.resolved_time_token,
-            )
-        )
+        artifacts.append(artifact)
     return tuple(sorted(artifacts, key=lambda artifact: artifact.path.name))
 
 
@@ -406,8 +465,8 @@ def discover_preprocessed_artifacts(
 
     for path in _iter_files(directory, ".npz"):
         preprocessed_metadata = parse_preprocessed_filename(path.name)
-        simulation_metadata = parse_simulation_filename(path.name)
-        if preprocessed_metadata is None and simulation_metadata is None:
+        simulation_artifact = _load_simulation_artifact(path)
+        if preprocessed_metadata is None and simulation_artifact is None:
             continue
 
         if preprocessed_metadata is not None:
@@ -436,19 +495,18 @@ def discover_preprocessed_artifacts(
             )
             continue
 
-        assert simulation_metadata is not None
         key = (
-            simulation_metadata.product_id,
-            simulation_metadata.timestamp,
-            simulation_metadata.time_step,
+            simulation_artifact.product_id,
+            simulation_artifact.timestamp,
+            simulation_artifact.time_step,
         )
         entry = entries.setdefault(
             key,
             {
-                "product_id": simulation_metadata.product_id,
-                "timestamp": simulation_metadata.timestamp,
-                "time_step": simulation_metadata.time_step,
-                "time_step_token": simulation_metadata.time_step_token,
+                "product_id": simulation_artifact.product_id,
+                "timestamp": simulation_artifact.timestamp,
+                "time_step": simulation_artifact.time_step,
+                "time_step_token": simulation_artifact.time_step_token,
                 "orderbook_path": None,
                 "simulation_artifacts": [],
                 "orderbook_views": (),
@@ -456,18 +514,7 @@ def discover_preprocessed_artifacts(
         )
         simulation_artifacts = entry["simulation_artifacts"]
         if isinstance(simulation_artifacts, list):
-            simulation_artifacts.append(
-                SimulationArtifact(
-                    product_id=simulation_metadata.product_id,
-                    timestamp=simulation_metadata.timestamp,
-                    time_step=simulation_metadata.time_step,
-                    algorithm_name=simulation_metadata.algorithm_name,
-                    path=path,
-                    time_step_token=simulation_metadata.time_step_token,
-                    resolved_time=simulation_metadata.resolved_time,
-                    resolved_time_token=simulation_metadata.resolved_time_token,
-                )
-            )
+            simulation_artifacts.append(simulation_artifact)
 
     artifacts: list[PreprocessedArtifact] = []
     for entry in entries.values():

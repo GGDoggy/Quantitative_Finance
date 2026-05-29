@@ -13,6 +13,7 @@ from src.dataset_artifacts import (
     detect_available_views as _detect_available_views,
     discover_preprocessed_artifacts,
     discover_simulation_artifacts,
+    format_resolved_time as _format_resolved_time,
     format_time_step as _format_time_step,
 )
 from src.raw_batches import RawBatch, discover_raw_batches as _discover_raw_batches
@@ -32,6 +33,13 @@ ViewSpecs = Sequence[tuple[str, Sequence[str]]]
 def format_time_step(time_step: float | str | Decimal) -> str:
     try:
         return _format_time_step(time_step)
+    except ValueError as error:
+        raise PreprocessValidationError(str(error)) from error
+
+
+def format_resolved_time(resolved_time: float | str | Decimal) -> str:
+    try:
+        return _format_resolved_time(resolved_time)
     except ValueError as error:
         raise PreprocessValidationError(str(error)) from error
 

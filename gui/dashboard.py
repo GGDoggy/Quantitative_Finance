@@ -33,6 +33,7 @@ from src.preprocess import (
     RawBatch,
     discover_preprocessed_datasets,
     discover_raw_batches,
+    format_resolved_time,
     format_time_step,
     parse_timestamp,
     preprocess_batches,
@@ -592,12 +593,11 @@ class OrderbookDashboard:
         if dataset.simulation_artifact is None:
             return "simulation-parameters-unrecognized"
         artifact = dataset.simulation_artifact
-        resolved_time = artifact.resolved_time_token
-        if resolved_time is None and artifact.resolved_time is not None:
-            resolved_time = str(artifact.resolved_time)
         signature_parts = [artifact.algorithm_name]
-        if resolved_time is not None:
-            signature_parts.append(f"resolved-{resolved_time}")
+        if artifact.resolved_time is not None:
+            signature_parts.append(
+                f"resolved-{format_resolved_time(artifact.resolved_time)}"
+            )
         return " | ".join(part for part in signature_parts if part)
 
     def _simulation_group_key(

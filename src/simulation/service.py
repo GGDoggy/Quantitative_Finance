@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -53,24 +55,20 @@ SIMULATION_RESULT_KEYS = (
     "ask_mid_profit",
     "ask_micro_profit",
 )
+SIMULATION_TIMEZONE = ZoneInfo("Asia/Taipei")
+
+
+def generate_simulation_timestamp() -> str:
+    now = datetime.now(SIMULATION_TIMEZONE)
+    return f"{now.strftime('%Y%m%d.%H%M%S')}.{now.microsecond // 1000:03d}"
 
 
 def build_output_path(
     output_path: Path | str,
-    product_id: str,
-    timestamp: str,
-    time_step: float,
     algorithm_name: str,
-    resolved_time: float,
+    simulation_timestamp: str,
 ) -> Path:
-    return build_simulation_output_path(
-        output_path,
-        product_id,
-        timestamp,
-        time_step,
-        algorithm_name,
-        resolved_time,
-    )
+    return build_simulation_output_path(output_path, algorithm_name, simulation_timestamp)
 
 
 def parse_dataset_groups(data_v3_path: Path | str) -> list[RawBatch]:
@@ -95,6 +93,7 @@ def save_result_file(
     output_file: Path,
     *,
     algorithm_name: str,
+    simulation_timestamp: str,
     dataset: RawBatch,
     time_step: float,
     base_tick: float,
@@ -105,7 +104,9 @@ def save_result_file(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     save_kwargs = {
         "algorithm": algorithm_name,
+        "simulation_timestamp": simulation_timestamp,
         "product_id": dataset.product_id,
+        "timestamp": dataset.timestamp,
         "file_stem": dataset.file_stem,
         "time_step": time_step,
         "base_tick": base_tick,
@@ -136,32 +137,6 @@ def _run_simulation(
     )
 
 
-def _save_result(
-    result: SimulationResult,
-    dataset: RawBatch,
-    request: SimulationRequest,
-    output_dir: Path | str,
-) -> Path:
-    output_file = build_output_path(
-        output_dir,
-        dataset.product_id,
-        dataset.timestamp,
-        request.time_step,
-        request.algorithm,
-        request.resolved_time,
-    )
-    return save_result_file(
-        output_file,
-        algorithm_name=request.algorithm,
-        dataset=dataset,
-        time_step=request.time_step,
-        base_tick=request.base_tick,
-        resolved_time=request.resolved_time,
-        depth=request.depth,
-        result=result,
-    )
-
-
 def simulate_loaded_data(
     data: LoadedMarketData,
     request: SimulationRequest,
@@ -174,18 +149,26 @@ def simulate_batch(
     request: SimulationRequest,
     output_dir: Path | str,
 ) -> SimulationJobResult:
+    simulation_timestamp = generate_simulation_timestamp()
     output_path = build_output_path(
         output_dir,
-        dataset.product_id,
-        dataset.timestamp,
-        request.time_step,
         request.algorithm,
-        request.resolved_time,
+        simulation_timestamp,
     )
     overwritten = output_path.exists()
     loaded_data = load_raw_dataset(dataset)
     result = simulate_loaded_data(loaded_data, request)
-    saved_path = _save_result(result, dataset, request, output_dir)
+    saved_path = save_result_file(
+        output_path,
+        algorithm_name=request.algorithm,
+        simulation_timestamp=simulation_timestamp,
+        dataset=dataset,
+        time_step=request.time_step,
+        base_tick=request.base_tick,
+        resolved_time=request.resolved_time,
+        depth=request.depth,
+        result=result,
+    )
     return SimulationJobResult(
         dataset=dataset,
         output_path=saved_path,
@@ -203,18 +186,26 @@ def _process_dataset_job(
     output_path: Path | str,
     request: SimulationRequest,
 ) -> SimulationWorkerPayload:
+    simulation_timestamp = generate_simulation_timestamp()
     output_file = build_output_path(
         output_path,
-        dataset.product_id,
-        dataset.timestamp,
-        request.time_step,
         request.algorithm,
-        request.resolved_time,
+        simulation_timestamp,
     )
     overwritten = output_file.exists()
     loaded_data = load_raw_dataset(dataset)
     result = simulate_loaded_data(loaded_data, request)
-    saved_path = _save_result(result, dataset, request, output_path)
+    saved_path = save_result_file(
+        output_file,
+        algorithm_name=request.algorithm,
+        simulation_timestamp=simulation_timestamp,
+        dataset=dataset,
+        time_step=request.time_step,
+        base_tick=request.base_tick,
+        resolved_time=request.resolved_time,
+        depth=request.depth,
+        result=result,
+    )
     return SimulationWorkerPayload(
         file_stem=dataset.file_stem,
         output_file=str(saved_path),

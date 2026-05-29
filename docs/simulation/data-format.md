@@ -3,7 +3,7 @@
 這份文件描述 simulation `.npz` 的輸出格式，也就是：
 
 ```text
-{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm_name}.npz
+simulation-{algorithm_name}-{simulation_timestamp}.npz
 ```
 
 ## Metadata keys
@@ -11,11 +11,14 @@
 每個 simulation `.npz` 目前至少包含：
 
 - `algorithm`
+- `simulation_timestamp`
 - `product_id`
+- `timestamp`
 - `file_stem`
 - `time_step`
 - `base_tick`
 - `resolved_time`
+- `depth`
 
 ## Array keys
 
