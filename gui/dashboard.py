@@ -147,6 +147,13 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
             visible=False,
         )
+        self.simulation_depth_input = pn.widgets.IntInput(
+            name="Simulation depth",
+            value=0,
+            step=1,
+            start=0,
+            sizing_mode="stretch_width",
+        )
         self.plot_select = pn.widgets.Select(
             name="Plot",
             options=[],
@@ -1441,9 +1448,10 @@ class OrderbookDashboard:
                 self.simulation_time_step_input.value,
                 "Simulation time_step",
             )
+            depth = int(self.simulation_depth_input.value)
             progress_messages.append(
                 f"Queued {batch_count} raw batch(es) for simulation with "
-                f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}."
+                f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}, depth={depth}."
             )
             self.simulation_progress.object = self._format_simulation_progress(
                 batch_count, progress_messages
@@ -1459,6 +1467,7 @@ class OrderbookDashboard:
                     time_step=time_step,
                     base_tick=GUI_SIMULATION_BASE_TICK,
                     resolved_time=resolved_time,
+                    depth=depth,
                 ),
                 output_dir=self.preprocessed_dir,
             )
@@ -1819,6 +1828,7 @@ class OrderbookDashboard:
             self.simulation_algorithm_select,
             self.simulation_resolved_time_input,
             self.simulation_time_step_input,
+            self.simulation_depth_input,
             pn.Row(
                 self.simulation_button,
                 self.simulation_spinner,

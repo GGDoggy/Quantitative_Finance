@@ -88,6 +88,7 @@ class SimulationRequest:
     time_step: float
     base_tick: float
     resolved_time: float
+    depth: int = 0
 
     def __post_init__(self) -> None:
         if not self.algorithm:
@@ -98,6 +99,8 @@ class SimulationRequest:
             raise ValueError("Simulation base_tick must be a positive finite value.")
         if not math.isfinite(self.resolved_time) or self.resolved_time < 0:
             raise ValueError("Simulation resolved_time must be a non-negative finite value.")
+        if not isinstance(self.depth, int) or self.depth < 0:
+            raise ValueError("Simulation depth must be a non-negative integer.")
 
 
 @dataclass(frozen=True)

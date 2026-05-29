@@ -99,6 +99,7 @@ def save_result_file(
     time_step: float,
     base_tick: float,
     resolved_time: float,
+    depth: int,
     result: SimulationResult,
 ) -> Path:
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +110,7 @@ def save_result_file(
         "time_step": time_step,
         "base_tick": base_tick,
         "resolved_time": resolved_time,
+        "depth": depth,
     }
     save_kwargs.update(serialize_result_for_npz(result))
     np.savez_compressed(output_file, **save_kwargs)
@@ -129,6 +131,7 @@ def _run_simulation(
             time_step=request.time_step,
             base_tick=request.base_tick,
             resolved_time=request.resolved_time,
+            depth=request.depth,
         )
     )
 
@@ -154,6 +157,7 @@ def _save_result(
         time_step=request.time_step,
         base_tick=request.base_tick,
         resolved_time=request.resolved_time,
+        depth=request.depth,
         result=result,
     )
 

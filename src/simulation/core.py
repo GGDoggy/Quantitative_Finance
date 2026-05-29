@@ -17,6 +17,8 @@ DEBUG_BEST_STATE = os.environ.get("DEBUG_BEST_STATE", "").lower() in {"1", "true
 class VirtualOrder:
     submit_time: float
     price: float
+    price_index: int
+    book_side: str
     near_size: float
     opp_size: float
     spread: float
@@ -24,6 +26,8 @@ class VirtualOrder:
     behind: float
     vorder_ratio: float
     remaining_size: float
+    is_live_at_best: bool = False
+    activated_time: float | None = None
     result: int = -1
     survival_time: float = -1.0
     fill_time: float = np.nan
@@ -223,6 +227,26 @@ def get_best_levels_from_indices(orderbook, price_levels, best_bid_index, best_a
     return best_bid_price, best_bid_size, best_ask_price, best_ask_size
 
 
+def get_level_from_depth(orderbook, price_levels, best_index, book_side, depth):
+    if best_index is None or depth < 0:
+        return None, np.nan, 0.0
+
+    step = -1 if book_side == "bid" else 1
+    matches_side = (lambda value: value < 0) if book_side == "bid" else (lambda value: value > 0)
+    remaining_depth = depth
+    current_index = best_index
+
+    while 0 <= current_index < len(orderbook):
+        if matches_side(orderbook[current_index]):
+            if remaining_depth == 0:
+                size = -orderbook[current_index] if book_side == "bid" else orderbook[current_index]
+                return current_index, float(price_levels[current_index]), float(size)
+            remaining_depth -= 1
+        current_index += step
+
+    return None, np.nan, 0.0
+
+
 def debug_best_state(
     stage,
     orderbook,
@@ -311,19 +335,35 @@ def compute_bid_ask_spread(best_bid_price, best_ask_price):
     return float(best_ask_price - best_bid_price)
 
 
-def create_virtual_order(best_size, opp_size, spread, submit_time, submit_price, base_tick):
-    if np.isnan(submit_price) or best_size <= 0:
+def create_virtual_order(
+    near_size,
+    opp_size,
+    spread,
+    submit_time,
+    submit_price,
+    base_tick,
+    price_index,
+    book_side,
+    *,
+    is_live_at_best=False,
+    activated_time=None,
+):
+    if np.isnan(submit_price) or near_size <= 0 or price_index is None:
         return None
     return VirtualOrder(
         submit_time=submit_time,
         price=float(submit_price),
-        near_size=float(best_size),
+        price_index=int(price_index),
+        book_side=str(book_side),
+        near_size=float(near_size),
         opp_size=float(opp_size),
         spread=float(spread),
-        ahead=float(best_size),
+        ahead=float(near_size),
         behind=0.0,
-        vorder_ratio=float(base_tick / best_size),
+        vorder_ratio=float(base_tick / near_size),
         remaining_size=float(base_tick),
+        is_live_at_best=bool(is_live_at_best),
+        activated_time=activated_time,
     )
 
 
@@ -401,6 +441,10 @@ def append_trade_evidence(pending_trade_evidence, trade_side, price, volume, eve
     pending_trade_evidence[trade_key].append(
         TradeEvidence(price=float(price), volume=float(volume), event_time=float(event_time))
     )
+
+
+def get_order_activation_time(order):
+    return order.activated_time if order.activated_time is not None else order.submit_time
 
 
 def split_trade_evidence(records, book_side, level_price):
@@ -484,9 +528,10 @@ def reconcile_same_best_price(
     for order in active_orders:
         if order.result != -1:
             continue
+        activation_time = get_order_activation_time(order)
 
-        pre_submit_trade = evidence_index.at_level_at_or_before(order.submit_time)
-        post_submit_trade = evidence_index.at_level_after(order.submit_time)
+        pre_submit_trade = evidence_index.at_level_at_or_before(activation_time)
+        post_submit_trade = evidence_index.at_level_after(activation_time)
 
         reduce_ahead_by_trade_volume(order, pre_submit_trade.volume)
 
@@ -516,8 +561,9 @@ def reconcile_price_change(
     for order in active_orders:
         if order.result != -1:
             continue
+        activation_time = get_order_activation_time(order)
 
-        traded_through_level = evidence_index.through_level_after(order.submit_time)
+        traded_through_level = evidence_index.through_level_after(activation_time)
         finalize_order(
             order,
             traded_through_level.last_event_time
@@ -527,7 +573,31 @@ def reconcile_price_change(
         )
 
 
-def reconcile_one_side(
+def get_live_orders_at_index(orders_by_price, price_index):
+    if price_index is None:
+        return []
+    return [
+        order
+        for order in orders_by_price.get(price_index, [])
+        if order.result == -1 and order.is_live_at_best
+    ]
+
+
+def promote_depth_orders_to_best(orders_by_price, current_best_index, activation_time):
+    if current_best_index is None:
+        return False
+
+    promoted = False
+    for order in orders_by_price.get(current_best_index, []):
+        if order.result != -1 or order.is_live_at_best:
+            continue
+        order.is_live_at_best = True
+        order.activated_time = float(activation_time)
+        promoted = True
+    return promoted
+
+
+def reconcile_live_best_orders(
     book_side,
     orders_by_price,
     previous_best_index,
@@ -541,7 +611,7 @@ def reconcile_one_side(
     if previous_best_index is None or np.isnan(previous_best_price):
         return False
 
-    orders_at_previous_best = get_active_orders_at_index(orders_by_price, previous_best_index)
+    orders_at_previous_best = get_live_orders_at_index(orders_by_price, previous_best_index)
     best_price_unchanged = same_price(previous_best_price, current_best_price)
     best_size_unchanged = np.isclose(previous_best_size, current_best_size)
     if best_price_unchanged and best_size_unchanged:
@@ -568,13 +638,7 @@ def reconcile_one_side(
         )
         return True
 
-    reconcile_price_change(
-        orders_at_previous_best,
-        [],
-        book_side,
-        previous_best_price,
-        update_event_time,
-    )
+    reconcile_price_change(orders_at_previous_best, [], book_side, previous_best_price, update_event_time)
     return True
 
 
@@ -808,6 +872,7 @@ def simulate_virtual_best_orders(
     time_step,
     base_tick,
     resolved_time=DEFAULT_RESOLVED_TIME,
+    depth=0,
 ):
     price_levels = {level[0] for level in init}
     price_levels.update(update[1] for update in updates)
@@ -957,7 +1022,7 @@ def simulate_virtual_best_orders(
                 current_ask_size,
             )
 
-            bid_consumed = reconcile_one_side(
+            bid_consumed = reconcile_live_best_orders(
                 "bid",
                 bid_orders_by_price,
                 previous_bid_index,
@@ -968,7 +1033,7 @@ def simulate_virtual_best_orders(
                 pending_trade_evidence["bid"],
                 event_time,
             )
-            ask_consumed = reconcile_one_side(
+            ask_consumed = reconcile_live_best_orders(
                 "ask",
                 ask_orders_by_price,
                 previous_ask_index,
@@ -984,6 +1049,9 @@ def simulate_virtual_best_orders(
                 pending_trade_evidence["bid"].clear()
             if ask_consumed:
                 pending_trade_evidence["ask"].clear()
+
+            promote_depth_orders_to_best(bid_orders_by_price, best_bid_index, event_time)
+            promote_depth_orders_to_best(ask_orders_by_price, best_ask_index, event_time)
             continue
 
         if next_submit_time > simulation_end:
@@ -1009,27 +1077,45 @@ def simulate_virtual_best_orders(
             event_type="submit",
         )
 
+        bid_price_index, bid_submit_price, bid_near_size = get_level_from_depth(
+            orderbook, price_levels, best_bid_index, "bid", depth
+        )
         bid_order = create_virtual_order(
-            best_bid_size,
+            bid_near_size,
             best_ask_size,
             compute_bid_ask_spread(best_bid_price, best_ask_price),
             next_submit_time,
-            best_bid_price,
+            bid_submit_price,
             base_tick,
+            bid_price_index,
+            "bid",
+            is_live_at_best=bid_price_index == best_bid_index,
+            activated_time=float(next_submit_time)
+            if bid_price_index == best_bid_index and bid_price_index is not None
+            else None,
         )
         if bid_order is not None:
-            get_orders_bucket(bid_orders_by_price, best_bid_index).append(bid_order)
+            get_orders_bucket(bid_orders_by_price, bid_price_index).append(bid_order)
 
+        ask_price_index, ask_submit_price, ask_near_size = get_level_from_depth(
+            orderbook, price_levels, best_ask_index, "ask", depth
+        )
         ask_order = create_virtual_order(
-            best_ask_size,
+            ask_near_size,
             best_bid_size,
             compute_bid_ask_spread(best_bid_price, best_ask_price),
             next_submit_time,
-            best_ask_price,
+            ask_submit_price,
             base_tick,
+            ask_price_index,
+            "ask",
+            is_live_at_best=ask_price_index == best_ask_index,
+            activated_time=float(next_submit_time)
+            if ask_price_index == best_ask_index and ask_price_index is not None
+            else None,
         )
         if ask_order is not None:
-            get_orders_bucket(ask_orders_by_price, best_ask_index).append(ask_order)
+            get_orders_bucket(ask_orders_by_price, ask_price_index).append(ask_order)
 
         next_submit_time += time_step
 
