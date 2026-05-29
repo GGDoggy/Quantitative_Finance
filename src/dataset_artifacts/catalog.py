@@ -32,7 +32,6 @@ SIMULATION_METADATA_REQUIRED_KEYS = (
     "time_step",
     "base_tick",
     "resolved_time",
-    "depth",
 )
 DEFAULT_VIEW_ORDER = (
     "orderbook",
@@ -89,7 +88,7 @@ class SimulationArtifact:
     simulation_timestamp: str
     time_step_token: str | None = None
     resolved_time: float | None = None
-    depth: int | None = None
+    depths: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -392,11 +391,28 @@ def _read_required_int(metadata: Mapping[str, object], field_name: str) -> int:
     return numeric
 
 
+def _read_depths(metadata: Mapping[str, object]) -> tuple[int, ...] | None:
+    if "depths" in metadata:
+        value = metadata.get("depths")
+        try:
+            array = np.asarray(value, dtype=int).reshape(-1)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Invalid simulation metadata field 'depths': {value!r}") from error
+        return tuple(int(item) for item in array.tolist())
+    if "depth" in metadata:
+        return (_read_required_int(metadata, "depth"),)
+    return None
+
+
 def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
     filename_metadata = parse_simulation_filename(path.name)
     if filename_metadata is None:
         return None
-    metadata = _load_npz_fields(path, SIMULATION_METADATA_REQUIRED_KEYS)
+    required_keys = SIMULATION_METADATA_REQUIRED_KEYS
+    try:
+        metadata = _load_npz_fields(path, (*required_keys, "depths"))
+    except ValueError:
+        metadata = _load_npz_fields(path, (*required_keys, "depth"))
     algorithm_name = _read_required_str(metadata, "algorithm")
     simulation_timestamp = _read_required_str(metadata, "simulation_timestamp")
     if algorithm_name != filename_metadata.algorithm_name:
@@ -416,7 +432,7 @@ def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
         simulation_timestamp=simulation_timestamp,
         time_step_token=format_time_step(_read_required_float(metadata, "time_step")),
         resolved_time=_read_required_float(metadata, "resolved_time"),
-        depth=_read_required_int(metadata, "depth"),
+        depths=_read_depths(metadata),
     )
 
 

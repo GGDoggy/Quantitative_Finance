@@ -21,6 +21,7 @@ from .core import (
     get_orders_bucket,
     initialize_best_indices,
     promote_depth_orders_to_best,
+    reconcile_resting_depth_orders,
     reconcile_live_best_orders,
     record_best_quote,
     side_to_trade_key,
@@ -50,46 +51,53 @@ def append_new_best_orders(
     best_ask_size,
     submit_time,
     base_tick,
-    depth,
+    depths,
 ):
     spread = compute_bid_ask_spread(best_bid_price, best_ask_price)
-    bid_price_index, bid_submit_price, bid_near_size = get_level_from_depth(
-        orderbook, price_levels, best_bid_index, "bid", depth
-    )
-    bid_order = create_virtual_order(
-        bid_near_size,
-        best_ask_size,
-        spread,
-        submit_time,
-        bid_submit_price,
-        base_tick,
-        bid_price_index,
-        "bid",
-        is_live_at_best=bid_price_index == best_bid_index,
-        activated_time=float(submit_time) if bid_price_index == best_bid_index and bid_price_index is not None else None,
-    )
-    if bid_order is not None:
-        get_orders_bucket(bid_orders_by_price, bid_price_index).append(bid_order)
+    bid_orders = []
+    ask_orders = []
+    for depth in depths:
+        bid_price_index, bid_submit_price, bid_near_size = get_level_from_depth(
+            orderbook, price_levels, best_bid_index, "bid", depth
+        )
+        bid_order = create_virtual_order(
+            bid_near_size,
+            best_ask_size,
+            spread,
+            submit_time,
+            bid_submit_price,
+            base_tick,
+            bid_price_index,
+            depth,
+            "bid",
+            is_live_at_best=bid_price_index == best_bid_index,
+            activated_time=float(submit_time) if bid_price_index == best_bid_index and bid_price_index is not None else None,
+        )
+        if bid_order is not None:
+            get_orders_bucket(bid_orders_by_price, bid_price_index).append(bid_order)
+            bid_orders.append(bid_order)
 
-    ask_price_index, ask_submit_price, ask_near_size = get_level_from_depth(
-        orderbook, price_levels, best_ask_index, "ask", depth
-    )
-    ask_order = create_virtual_order(
-        ask_near_size,
-        best_bid_size,
-        spread,
-        submit_time,
-        ask_submit_price,
-        base_tick,
-        ask_price_index,
-        "ask",
-        is_live_at_best=ask_price_index == best_ask_index,
-        activated_time=float(submit_time) if ask_price_index == best_ask_index and ask_price_index is not None else None,
-    )
-    if ask_order is not None:
-        get_orders_bucket(ask_orders_by_price, ask_price_index).append(ask_order)
+        ask_price_index, ask_submit_price, ask_near_size = get_level_from_depth(
+            orderbook, price_levels, best_ask_index, "ask", depth
+        )
+        ask_order = create_virtual_order(
+            ask_near_size,
+            best_bid_size,
+            spread,
+            submit_time,
+            ask_submit_price,
+            base_tick,
+            ask_price_index,
+            depth,
+            "ask",
+            is_live_at_best=ask_price_index == best_ask_index,
+            activated_time=float(submit_time) if ask_price_index == best_ask_index and ask_price_index is not None else None,
+        )
+        if ask_order is not None:
+            get_orders_bucket(ask_orders_by_price, ask_price_index).append(ask_order)
+            ask_orders.append(ask_order)
 
-    return bid_order, ask_order
+    return bid_orders, ask_orders
 
 
 def has_more_events_at_time(events, event_index, event_time):
@@ -125,31 +133,36 @@ def _append_bid_order(
     orderbook,
     price_levels,
     best_bid_index,
-    depth,
+    depths,
     best_ask_size,
     event_time,
     best_bid_price,
     best_ask_price,
     base_tick,
 ):
-    bid_price_index, bid_submit_price, bid_near_size = get_level_from_depth(
-        orderbook, price_levels, best_bid_index, "bid", depth
-    )
-    bid_order = create_virtual_order(
-        bid_near_size,
-        best_ask_size,
-        compute_bid_ask_spread(best_bid_price, best_ask_price),
-        event_time,
-        bid_submit_price,
-        base_tick,
-        bid_price_index,
-        "bid",
-        is_live_at_best=bid_price_index == best_bid_index,
-        activated_time=float(event_time) if bid_price_index == best_bid_index and bid_price_index is not None else None,
-    )
-    if bid_order is not None:
-        get_orders_bucket(bid_orders_by_price, bid_price_index).append(bid_order)
-    return bid_order
+    created_orders = []
+    spread = compute_bid_ask_spread(best_bid_price, best_ask_price)
+    for depth in depths:
+        bid_price_index, bid_submit_price, bid_near_size = get_level_from_depth(
+            orderbook, price_levels, best_bid_index, "bid", depth
+        )
+        bid_order = create_virtual_order(
+            bid_near_size,
+            best_ask_size,
+            spread,
+            event_time,
+            bid_submit_price,
+            base_tick,
+            bid_price_index,
+            depth,
+            "bid",
+            is_live_at_best=bid_price_index == best_bid_index,
+            activated_time=float(event_time) if bid_price_index == best_bid_index and bid_price_index is not None else None,
+        )
+        if bid_order is not None:
+            get_orders_bucket(bid_orders_by_price, bid_price_index).append(bid_order)
+            created_orders.append(bid_order)
+    return created_orders
 
 
 def _append_ask_order(
@@ -157,31 +170,36 @@ def _append_ask_order(
     orderbook,
     price_levels,
     best_ask_index,
-    depth,
+    depths,
     best_bid_size,
     event_time,
     best_ask_price,
     best_bid_price,
     base_tick,
 ):
-    ask_price_index, ask_submit_price, ask_near_size = get_level_from_depth(
-        orderbook, price_levels, best_ask_index, "ask", depth
-    )
-    ask_order = create_virtual_order(
-        ask_near_size,
-        best_bid_size,
-        compute_bid_ask_spread(best_bid_price, best_ask_price),
-        event_time,
-        ask_submit_price,
-        base_tick,
-        ask_price_index,
-        "ask",
-        is_live_at_best=ask_price_index == best_ask_index,
-        activated_time=float(event_time) if ask_price_index == best_ask_index and ask_price_index is not None else None,
-    )
-    if ask_order is not None:
-        get_orders_bucket(ask_orders_by_price, ask_price_index).append(ask_order)
-    return ask_order
+    created_orders = []
+    spread = compute_bid_ask_spread(best_bid_price, best_ask_price)
+    for depth in depths:
+        ask_price_index, ask_submit_price, ask_near_size = get_level_from_depth(
+            orderbook, price_levels, best_ask_index, "ask", depth
+        )
+        ask_order = create_virtual_order(
+            ask_near_size,
+            best_bid_size,
+            spread,
+            event_time,
+            ask_submit_price,
+            base_tick,
+            ask_price_index,
+            depth,
+            "ask",
+            is_live_at_best=ask_price_index == best_ask_index,
+            activated_time=float(event_time) if ask_price_index == best_ask_index and ask_price_index is not None else None,
+        )
+        if ask_order is not None:
+            get_orders_bucket(ask_orders_by_price, ask_price_index).append(ask_order)
+            created_orders.append(ask_order)
+    return created_orders
 
 
 def simulate_best_size_changed(
@@ -192,8 +210,10 @@ def simulate_best_size_changed(
     time_step,
     base_tick,
     resolved_time=DEFAULT_RESOLVED_TIME,
-    depth=0,
+    depths=None,
 ):
+    if depths is None:
+        depths = [0]
     price_levels = {level[0] for level in init}
     price_levels.update(update[1] for update in updates)
     price_levels = np.array(sorted(price_levels), dtype=float)
@@ -392,11 +412,23 @@ def simulate_best_size_changed(
                 pending_trade_evidence["ask"],
                 event_time,
             )
+            bid_depth_filled = reconcile_resting_depth_orders(
+                "bid",
+                bid_orders_by_price,
+                pending_trade_evidence["bid"],
+                event_time,
+            )
+            ask_depth_filled = reconcile_resting_depth_orders(
+                "ask",
+                ask_orders_by_price,
+                pending_trade_evidence["ask"],
+                event_time,
+            )
 
-            if bid_consumed:
+            if bid_consumed or bid_depth_filled:
                 pending_trade_evidence["bid"].clear()
                 unresolved_order_counts["bid"] = _count_unresolved_orders(bid_orders_by_price)
-            if ask_consumed:
+            if ask_consumed or ask_depth_filled:
                 pending_trade_evidence["ask"].clear()
                 unresolved_order_counts["ask"] = _count_unresolved_orders(ask_orders_by_price)
 
@@ -435,15 +467,14 @@ def simulate_best_size_changed(
                     orderbook,
                     price_levels,
                     best_bid_index,
-                    depth,
+                    depths,
                     current_ask_size,
                     event_time,
                     current_bid_price,
                     current_ask_price,
                     base_tick,
                 )
-                if bid_order is not None:
-                    unresolved_order_counts["bid"] += 1
+                unresolved_order_counts["bid"] += len(bid_order)
 
             if _best_level_changed(
                 previous_ask_price,
@@ -469,15 +500,14 @@ def simulate_best_size_changed(
                     orderbook,
                     price_levels,
                     best_ask_index,
-                    depth,
+                    depths,
                     current_bid_size,
                     event_time,
                     current_ask_price,
                     current_bid_price,
                     base_tick,
                 )
-                if ask_order is not None:
-                    unresolved_order_counts["ask"] += 1
+                unresolved_order_counts["ask"] += len(ask_order)
 
             if next_submit_time is not None and event_time >= next_submit_time:
                 next_submit_time = None
@@ -519,12 +549,10 @@ def simulate_best_size_changed(
             best_ask_size,
             next_submit_time,
             base_tick,
-            depth,
+            depths,
         )
-        if bid_order is not None:
-            unresolved_order_counts["bid"] += 1
-        if ask_order is not None:
-            unresolved_order_counts["ask"] += 1
+        unresolved_order_counts["bid"] += len(bid_order)
+        unresolved_order_counts["ask"] += len(ask_order)
         next_submit_time = None
 
     bid_orders = [order for bucket in bid_orders_by_price.values() for order in bucket]
@@ -552,10 +580,10 @@ def simulate_best_size_changed(
     bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time, "bid")
     ask_output = finalize_unresolved(ask_orders, quote_timeline, resolved_time, "ask")
     return (
-        *bid_output[:9],
-        *ask_output[:9],
-        *bid_output[9:],
-        *ask_output[9:],
+        *bid_output[:10],
+        *ask_output[:10],
+        *bid_output[10:],
+        *ask_output[10:],
     )
 
 
@@ -567,8 +595,10 @@ def simulate_event_balanced(
     time_step,
     base_tick,
     resolved_time=DEFAULT_RESOLVED_TIME,
-    depth=0,
+    depths=None,
 ):
+    if depths is None:
+        depths = [0]
     price_levels = {level[0] for level in init}
     price_levels.update(update[1] for update in updates)
     price_levels = np.array(sorted(price_levels), dtype=float)
@@ -616,8 +646,8 @@ def simulate_event_balanced(
     bid_orders_by_price = {}
     ask_orders_by_price = {}
 
-    active_bid_order = None
-    active_ask_order = None
+    active_bid_orders = {depth: None for depth in depths}
+    active_ask_orders = {depth: None for depth in depths}
     pending_update_reference = None
     next_submit_time = simulation_start
 
@@ -671,8 +701,11 @@ def simulate_event_balanced(
                     continue
 
                 trade_key = side_to_trade_key(event_side)
-                active_order = active_bid_order if trade_key == "bid" else active_ask_order
-                if active_order is None or active_order.result != -1:
+                active_orders = active_bid_orders if trade_key == "bid" else active_ask_orders
+                if not any(
+                    order is not None and order.result == -1
+                    for order in active_orders.values()
+                ):
                     pending_trade_evidence[trade_key].clear()
                     continue
 
@@ -769,10 +802,22 @@ def simulate_event_balanced(
                 pending_trade_evidence["ask"],
                 event_time,
             )
+            bid_depth_filled = reconcile_resting_depth_orders(
+                "bid",
+                bid_orders_by_price,
+                pending_trade_evidence["bid"],
+                event_time,
+            )
+            ask_depth_filled = reconcile_resting_depth_orders(
+                "ask",
+                ask_orders_by_price,
+                pending_trade_evidence["ask"],
+                event_time,
+            )
 
-            if bid_consumed:
+            if bid_consumed or bid_depth_filled:
                 pending_trade_evidence["bid"].clear()
-            if ask_consumed:
+            if ask_consumed or ask_depth_filled:
                 pending_trade_evidence["ask"].clear()
 
             promote_depth_orders_to_best(bid_orders_by_price, best_bid_index, event_time)
@@ -784,12 +829,21 @@ def simulate_event_balanced(
             if event_time < simulation_start:
                 continue
 
-            if active_bid_order is not None and active_bid_order.result != -1:
-                active_bid_order = None
-            if active_ask_order is not None and active_ask_order.result != -1:
-                active_ask_order = None
+            for depth in depths:
+                if (
+                    active_bid_orders[depth] is not None
+                    and active_bid_orders[depth].result != -1
+                ):
+                    active_bid_orders[depth] = None
+                if (
+                    active_ask_orders[depth] is not None
+                    and active_ask_orders[depth].result != -1
+                ):
+                    active_ask_orders[depth] = None
 
-            if active_bid_order is None or active_ask_order is None:
+            if any(active_bid_orders[depth] is None for depth in depths) or any(
+                active_ask_orders[depth] is None for depth in depths
+            ):
                 debug_best_state(
                     "before_submit",
                     orderbook,
@@ -805,43 +859,54 @@ def simulate_event_balanced(
                 )
                 spread = compute_bid_ask_spread(current_bid_price, current_ask_price)
 
-            if active_bid_order is None:
-                active_bid_order = create_virtual_order(
-                    get_level_from_depth(orderbook, price_levels, best_bid_index, "bid", depth)[2],
-                    current_ask_size,
-                    spread,
-                    event_time,
-                    get_level_from_depth(orderbook, price_levels, best_bid_index, "bid", depth)[1],
-                    base_tick,
-                    get_level_from_depth(orderbook, price_levels, best_bid_index, "bid", depth)[0],
-                    "bid",
-                    is_live_at_best=get_level_from_depth(orderbook, price_levels, best_bid_index, "bid", depth)[0] == best_bid_index,
-                    activated_time=float(event_time)
-                    if get_level_from_depth(orderbook, price_levels, best_bid_index, "bid", depth)[0] == best_bid_index
-                    and get_level_from_depth(orderbook, price_levels, best_bid_index, "bid", depth)[0] is not None
-                    else None,
-                )
-                if active_bid_order is not None:
-                    get_orders_bucket(bid_orders_by_price, active_bid_order.price_index).append(active_bid_order)
+            for depth in depths:
+                if active_bid_orders[depth] is None:
+                    bid_level = get_level_from_depth(
+                        orderbook, price_levels, best_bid_index, "bid", depth
+                    )
+                    active_bid_orders[depth] = create_virtual_order(
+                        bid_level[2],
+                        current_ask_size,
+                        spread,
+                        event_time,
+                        bid_level[1],
+                        base_tick,
+                        bid_level[0],
+                        depth,
+                        "bid",
+                        is_live_at_best=bid_level[0] == best_bid_index,
+                        activated_time=float(event_time)
+                        if bid_level[0] == best_bid_index and bid_level[0] is not None
+                        else None,
+                    )
+                    if active_bid_orders[depth] is not None:
+                        get_orders_bucket(
+                            bid_orders_by_price, active_bid_orders[depth].price_index
+                        ).append(active_bid_orders[depth])
 
-            if active_ask_order is None:
-                active_ask_order = create_virtual_order(
-                    get_level_from_depth(orderbook, price_levels, best_ask_index, "ask", depth)[2],
-                    current_bid_size,
-                    spread,
-                    event_time,
-                    get_level_from_depth(orderbook, price_levels, best_ask_index, "ask", depth)[1],
-                    base_tick,
-                    get_level_from_depth(orderbook, price_levels, best_ask_index, "ask", depth)[0],
-                    "ask",
-                    is_live_at_best=get_level_from_depth(orderbook, price_levels, best_ask_index, "ask", depth)[0] == best_ask_index,
-                    activated_time=float(event_time)
-                    if get_level_from_depth(orderbook, price_levels, best_ask_index, "ask", depth)[0] == best_ask_index
-                    and get_level_from_depth(orderbook, price_levels, best_ask_index, "ask", depth)[0] is not None
-                    else None,
-                )
-                if active_ask_order is not None:
-                    get_orders_bucket(ask_orders_by_price, active_ask_order.price_index).append(active_ask_order)
+                if active_ask_orders[depth] is None:
+                    ask_level = get_level_from_depth(
+                        orderbook, price_levels, best_ask_index, "ask", depth
+                    )
+                    active_ask_orders[depth] = create_virtual_order(
+                        ask_level[2],
+                        current_bid_size,
+                        spread,
+                        event_time,
+                        ask_level[1],
+                        base_tick,
+                        ask_level[0],
+                        depth,
+                        "ask",
+                        is_live_at_best=ask_level[0] == best_ask_index,
+                        activated_time=float(event_time)
+                        if ask_level[0] == best_ask_index and ask_level[0] is not None
+                        else None,
+                    )
+                    if active_ask_orders[depth] is not None:
+                        get_orders_bucket(
+                            ask_orders_by_price, active_ask_orders[depth].price_index
+                        ).append(active_ask_orders[depth])
 
             if next_submit_time is not None and event_time >= next_submit_time:
                 next_submit_time = None
@@ -870,7 +935,7 @@ def simulate_event_balanced(
             event_time=next_submit_time,
             event_type="submit",
         )
-        active_bid_order, active_ask_order = append_new_best_orders(
+        initial_bid_orders, initial_ask_orders = append_new_best_orders(
             bid_orders_by_price,
             ask_orders_by_price,
             orderbook,
@@ -883,8 +948,12 @@ def simulate_event_balanced(
             best_ask_size,
             next_submit_time,
             base_tick,
-            depth,
+            depths,
         )
+        for order in initial_bid_orders:
+            active_bid_orders[order.depth] = order
+        for order in initial_ask_orders:
+            active_ask_orders[order.depth] = order
         next_submit_time = None
 
     bid_orders = [order for bucket in bid_orders_by_price.values() for order in bucket]
@@ -912,10 +981,10 @@ def simulate_event_balanced(
     bid_output = finalize_unresolved(bid_orders, quote_timeline, resolved_time, "bid")
     ask_output = finalize_unresolved(ask_orders, quote_timeline, resolved_time, "ask")
     return (
-        *bid_output[:9],
-        *ask_output[:9],
-        *bid_output[9:],
-        *ask_output[9:],
+        *bid_output[:10],
+        *ask_output[:10],
+        *bid_output[10:],
+        *ask_output[10:],
     )
 
 

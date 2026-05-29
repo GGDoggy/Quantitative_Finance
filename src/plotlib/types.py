@@ -33,9 +33,11 @@ class TradesPayloadV1(TypedDict):
 
 class SimulationArraysV1(TypedDict):
     schema_version: SchemaVersionV1
+    bid_depth: np.ndarray
     bid_near_size: np.ndarray
     bid_opp_size: np.ndarray
     bid_result: np.ndarray
+    ask_depth: np.ndarray
     ask_near_size: np.ndarray
     ask_opp_size: np.ndarray
     ask_result: np.ndarray

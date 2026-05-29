@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import fields
 from datetime import datetime
 import os
 from pathlib import Path
@@ -29,6 +30,7 @@ DEFAULT_BASE_TICK = 0.00000001
 DEFAULT_RESOLVED_TIME = 1.0
 SIMULATION_RESULT_KEYS = (
     "bid_prices",
+    "bid_depth",
     "bid_near_size",
     "bid_opp_size",
     "bid_survival_time",
@@ -38,6 +40,7 @@ SIMULATION_RESULT_KEYS = (
     "bid_result",
     "bid_spread",
     "ask_prices",
+    "ask_depth",
     "ask_near_size",
     "ask_opp_size",
     "ask_survival_time",
@@ -89,6 +92,37 @@ def serialize_result_for_npz(result: SimulationResult) -> dict[str, Any]:
     return dict(zip(SIMULATION_RESULT_KEYS, result.as_tuple()))
 
 
+def _simulation_result_field_names() -> tuple[str, ...]:
+    return tuple(field.name for field in fields(SimulationResult))
+
+
+def merge_simulation_results(results_by_depth: list[SimulationResult]) -> SimulationResult:
+    if not results_by_depth:
+        raise ValueError("At least one simulation result is required to merge.")
+
+    merged_payload: dict[str, np.ndarray] = {}
+    for field_name in _simulation_result_field_names():
+        merged_payload[field_name] = np.concatenate(
+            [np.asarray(getattr(result, field_name)) for result in results_by_depth]
+        )
+    return SimulationResult(**merged_payload)
+
+
+def simulate_single_depth_loaded_data(
+    data: LoadedMarketData,
+    request: SimulationRequest,
+    depth: int,
+) -> SimulationResult:
+    single_depth_request = SimulationRequest(
+        algorithm=request.algorithm,
+        time_step=request.time_step,
+        base_tick=request.base_tick,
+        resolved_time=request.resolved_time,
+        depths=[depth],
+    )
+    return _run_simulation(single_depth_request, data)
+
+
 def save_result_file(
     output_file: Path,
     *,
@@ -98,7 +132,7 @@ def save_result_file(
     time_step: float,
     base_tick: float,
     resolved_time: float,
-    depth: int,
+    depths: list[int],
     result: SimulationResult,
 ) -> Path:
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +145,7 @@ def save_result_file(
         "time_step": time_step,
         "base_tick": base_tick,
         "resolved_time": resolved_time,
-        "depth": depth,
+        "depths": np.asarray(depths, dtype=int),
     }
     save_kwargs.update(serialize_result_for_npz(result))
     np.savez_compressed(output_file, **save_kwargs)
@@ -132,7 +166,7 @@ def _run_simulation(
             time_step=request.time_step,
             base_tick=request.base_tick,
             resolved_time=request.resolved_time,
-            depth=request.depth,
+            depths=request.depths,
         )
     )
 
@@ -141,7 +175,14 @@ def simulate_loaded_data(
     data: LoadedMarketData,
     request: SimulationRequest,
 ) -> SimulationResult:
-    return _run_simulation(request, data)
+    if len(request.depths) == 1:
+        return _run_simulation(request, data)
+
+    results_by_depth = [
+        simulate_single_depth_loaded_data(data, request, depth)
+        for depth in request.depths
+    ]
+    return merge_simulation_results(results_by_depth)
 
 
 def simulate_batch(
@@ -166,7 +207,7 @@ def simulate_batch(
         time_step=request.time_step,
         base_tick=request.base_tick,
         resolved_time=request.resolved_time,
-        depth=request.depth,
+        depths=request.depths,
         result=result,
     )
     return SimulationJobResult(
@@ -203,7 +244,7 @@ def _process_dataset_job(
         time_step=request.time_step,
         base_tick=request.base_tick,
         resolved_time=request.resolved_time,
-        depth=request.depth,
+        depths=request.depths,
         result=result,
     )
     return SimulationWorkerPayload(

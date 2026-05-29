@@ -178,6 +178,7 @@ PRODUCT_PLACEHOLDER = "Select a product..."
 PLOT_PLACEHOLDER = "Select a plot..."
 TIMESTAMP_PLACEHOLDER = "Select a timestamp..."
 FILL_GROUP_PLACEHOLDER = "Select a simulation group..."
+DEPTH_PLACEHOLDER = "Select a depth..."
 
 SIMULATION_HEATMAP_PLOT_TYPES = {
     "fill_probability",

@@ -27,6 +27,7 @@ from .registry import (
 )
 from .simulation_heatmaps import (
     build_fill_probability_view,
+    filter_simulation_arrays_by_depth,
     build_micro_cost_fill_probability_view,
     build_micro_profit_view,
     build_mid_cost_fill_probability_view,
@@ -68,6 +69,7 @@ __all__ = [
     "SimulationHeatmapSettings",
     "TradesPayloadV1",
     "build_fill_probability_view",
+    "filter_simulation_arrays_by_depth",
     "build_micro_cost_fill_probability_view",
     "build_micro_profit_view",
     "build_mid_cost_fill_probability_view",

@@ -47,6 +47,7 @@ from src.simulation import (
 )
 from .styles import (
     COST_FILTERED_PLOT_TYPES,
+    DEPTH_PLACEHOLDER,
     FILL_GROUP_PLACEHOLDER,
     PLOTLY_DARK_LAYOUT,
     PLOT_PLACEHOLDER,
@@ -148,11 +149,10 @@ class OrderbookDashboard:
             sizing_mode="stretch_width",
             visible=False,
         )
-        self.simulation_depth_input = pn.widgets.IntInput(
-            name="Simulation depth",
-            value=0,
-            step=1,
-            start=0,
+        self.simulation_depth_input = pn.widgets.TextInput(
+            name="Simulation depths",
+            value="0",
+            placeholder="0,1,2",
             sizing_mode="stretch_width",
         )
         self.plot_select = pn.widgets.Select(
@@ -167,6 +167,13 @@ class OrderbookDashboard:
         )
         self.fill_group_select = pn.widgets.Select(
             name="Simulation group",
+            options={},
+            sizing_mode="stretch_width",
+            visible=False,
+            disabled=True,
+        )
+        self.simulation_plot_depth_select = pn.widgets.Select(
+            name="Depth",
             options={},
             sizing_mode="stretch_width",
             visible=False,
@@ -338,6 +345,9 @@ class OrderbookDashboard:
         self.plot_select.param.watch(self._handle_plot_change, "value")
         self.timestamp_select.param.watch(self._handle_timestamp_change, "value")
         self.fill_group_select.param.watch(self._handle_fill_group_change, "value")
+        self.simulation_plot_depth_select.param.watch(
+            self._handle_simulation_depth_change, "value"
+        )
         self.cost_input.param.watch(self._handle_cost_change, "value")
         self.simulation_size_min_input.param.watch(
             self._handle_simulation_heatmap_setting_change, "value"
@@ -598,6 +608,10 @@ class OrderbookDashboard:
             signature_parts.append(
                 f"resolved-{format_resolved_time(artifact.resolved_time)}"
             )
+        if artifact.depths:
+            signature_parts.append(
+                "depths-" + ",".join(str(depth) for depth in artifact.depths)
+            )
         return " | ".join(part for part in signature_parts if part)
 
     def _simulation_group_key(
@@ -659,6 +673,30 @@ class OrderbookDashboard:
             return [non_simulation_datasets[0]]
         return matching_datasets[:1]
 
+    @staticmethod
+    def _dataset_simulation_depths(dataset: PreprocessedDataset) -> tuple[int, ...]:
+        if dataset.simulation_path is None:
+            return ()
+        artifact = dataset.simulation_artifact
+        if artifact is None or not artifact.depths:
+            return (0,)
+        return tuple(sorted(set(int(depth) for depth in artifact.depths)))
+
+    def _available_simulation_depths(self) -> list[int]:
+        return sorted(
+            {
+                depth
+                for dataset in self._selected_datasets_for_plot()
+                for depth in self._dataset_simulation_depths(dataset)
+            }
+        )
+
+    def _selected_simulation_depth(self) -> int | None:
+        value = self.simulation_plot_depth_select.value
+        if value is None or value == "":
+            return None
+        return int(value)
+
     def _update_dataset_summary(self) -> None:
         if not self.preprocessed_datasets:
             self.dataset_summary.object = (
@@ -711,6 +749,7 @@ class OrderbookDashboard:
             self.dataset_summary.object = (
                 f"**Current product:** {product_id}\n\n"
                 f"**Current plot:** {plot_label}\n\n"
+                f"**Selected depth:** {self._selected_simulation_depth() if self._selected_simulation_depth() is not None else 'None'}\n\n"
                 f"**Merged timestamp count:** "
                 f"{len({dataset.timestamp for dataset in selected_datasets})}\n\n"
                 f"**Simulation file count:** "
@@ -804,6 +843,7 @@ class OrderbookDashboard:
                 self.fill_group_select.value = group_value
             finally:
                 self._updating_controls = False
+        self._sync_simulation_depth_options(render=False)
 
         self._render_plots()
 
@@ -903,6 +943,26 @@ class OrderbookDashboard:
         if not math.isfinite(number):
             raise ValueError(f"{label} must be finite.")
         return number
+
+    @staticmethod
+    def _parse_simulation_depths(value: object) -> list[int]:
+        if value is None:
+            raise ValueError("Simulation depths are required.")
+        tokens = [token.strip() for token in str(value).split(",")]
+        depths: list[int] = []
+        for token in tokens:
+            if not token:
+                continue
+            try:
+                depth = int(token)
+            except ValueError as error:
+                raise ValueError(f"Invalid simulation depth: {token!r}") from error
+            if depth < 0:
+                raise ValueError("Simulation depths must be non-negative integers.")
+            depths.append(depth)
+        if not depths:
+            raise ValueError("Simulation depths are required.")
+        return sorted(set(depths))
 
     def _validate_axis_settings(
         self,
@@ -1113,6 +1173,11 @@ class OrderbookDashboard:
                     if plot_type in SIMULATION_HEATMAP_PLOT_TYPES
                     else None
                 ),
+                simulation_depth=(
+                    self._selected_simulation_depth()
+                    if plot_type in SIMULATION_HEATMAP_PLOT_TYPES
+                    else None
+                ),
             ),
         )
         if isinstance(plot, Figure):
@@ -1246,6 +1311,17 @@ class OrderbookDashboard:
             if not self.fill_group_select.value:
                 return self._empty_state(
                     f"Select a simulation group for `{product_id}` before rendering.",
+                    "info",
+                )
+            if not self._selectable_option_values(self.simulation_plot_depth_select.options):
+                return self._empty_state(
+                    f"{self._plot_label_for_type(plot_type)} cannot be rendered "
+                    f"because the selected simulation group does not expose any depths.",
+                    "warning",
+                )
+            if self._selected_simulation_depth() is None:
+                return self._empty_state(
+                    f"Select a depth for `{product_id}` before rendering.",
                     "info",
                 )
             return None
@@ -1448,10 +1524,10 @@ class OrderbookDashboard:
                 self.simulation_time_step_input.value,
                 "Simulation time_step",
             )
-            depth = int(self.simulation_depth_input.value)
+            depths = self._parse_simulation_depths(self.simulation_depth_input.value)
             progress_messages.append(
                 f"Queued {batch_count} raw batch(es) for simulation with "
-                f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}, depth={depth}."
+                f"{algorithm_name}, resolved_time={resolved_time}, time_step={time_step}, depths={depths}."
             )
             self.simulation_progress.object = self._format_simulation_progress(
                 batch_count, progress_messages
@@ -1467,7 +1543,7 @@ class OrderbookDashboard:
                     time_step=time_step,
                     base_tick=GUI_SIMULATION_BASE_TICK,
                     resolved_time=resolved_time,
-                    depth=depth,
+                    depths=depths,
                 ),
                 output_dir=self.preprocessed_dir,
             )
@@ -1564,6 +1640,7 @@ class OrderbookDashboard:
                     self.fill_group_select.value = group_value
                 finally:
                     self._updating_controls = False
+            self._sync_simulation_depth_options(render=False)
 
         self._render_plots()
 
@@ -1580,6 +1657,10 @@ class OrderbookDashboard:
             self._render_plots()
 
     def _handle_fill_group_change(self, _event) -> None:
+        if not self._updating_controls:
+            self._sync_simulation_depth_options(render=True)
+
+    def _handle_simulation_depth_change(self, _event) -> None:
         if not self._updating_controls:
             self._render_plots()
 
@@ -1703,6 +1784,40 @@ class OrderbookDashboard:
             self.fill_group_select.disabled = not is_simulation_heatmap
             self.fill_group_select.options = group_options
             self.fill_group_select.value = next_group
+            self._sync_simulation_depth_options(render=False)
+        finally:
+            self._updating_controls = False
+
+        if render:
+            self._render_plots()
+
+    def _sync_simulation_depth_options(self, *, render: bool) -> None:
+        plot_type = self._selected_plot_type()
+        is_simulation_heatmap = plot_type in SIMULATION_HEATMAP_PLOT_TYPES
+        if is_simulation_heatmap and self.fill_group_select.value:
+            depth_options = {
+                str(depth): depth for depth in self._available_simulation_depths()
+            }
+        else:
+            depth_options = {}
+
+        previous_depth = self.simulation_plot_depth_select.value
+        depth_options = self._with_placeholder_options(
+            depth_options,
+            DEPTH_PLACEHOLDER,
+        )
+        depth_values = self._selectable_option_values(depth_options)
+        default_depth = 0 if 0 in depth_values else (min(depth_values) if depth_values else None)
+        next_depth = previous_depth if previous_depth in depth_values else default_depth
+
+        self._updating_controls = True
+        try:
+            self.simulation_plot_depth_select.visible = is_simulation_heatmap
+            self.simulation_plot_depth_select.disabled = (
+                not is_simulation_heatmap or not bool(self.fill_group_select.value)
+            )
+            self.simulation_plot_depth_select.options = depth_options
+            self.simulation_plot_depth_select.value = next_depth
             self._sync_cost_input(render=False)
         finally:
             self._updating_controls = False
@@ -1860,6 +1975,8 @@ class OrderbookDashboard:
         self.timestamp_select.disabled = is_simulation_heatmap
         self.fill_group_select.visible = is_simulation_heatmap
         self.fill_group_select.disabled = not is_simulation_heatmap
+        self.simulation_plot_depth_select.visible = is_simulation_heatmap
+        self.simulation_plot_depth_select.disabled = not is_simulation_heatmap
         self.cost_input.visible = show_cost_input
         self.cost_input.disabled = not show_cost_input
         self._sync_simulation_heatmap_settings_controls()
@@ -1868,6 +1985,7 @@ class OrderbookDashboard:
             self.plot_select,
             self.timestamp_select,
             self.fill_group_select,
+            self.simulation_plot_depth_select,
             self.cost_input,
             self.simulation_size_min_input,
             self.simulation_size_max_input,

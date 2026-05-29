@@ -79,3 +79,8 @@ simulation-{algorithm_name}-{simulation_timestamp}.npz
 - profit 圖只會統計 `result == 1` 的樣本
 
 這是目前 dashboard 對 simulation 結果的核心假設。
+## Profit timing
+
+- `result == 1`: profit is sampled from `fill_time + resolved_time`
+- `result == 0`: profit is sampled from `cancel_time + resolved_time`
+- `result == -1`: profit remains `NaN`

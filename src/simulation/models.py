@@ -21,6 +21,7 @@ class LoadedMarketData:
 @dataclass(frozen=True)
 class SimulationResult:
     bid_prices: np.ndarray
+    bid_depth: np.ndarray
     bid_near_size: np.ndarray
     bid_opp_size: np.ndarray
     bid_survival_time: np.ndarray
@@ -30,6 +31,7 @@ class SimulationResult:
     bid_result: np.ndarray
     bid_spread: np.ndarray
     ask_prices: np.ndarray
+    ask_depth: np.ndarray
     ask_near_size: np.ndarray
     ask_opp_size: np.ndarray
     ask_survival_time: np.ndarray
@@ -54,6 +56,7 @@ class SimulationResult:
     def as_tuple(self) -> tuple[np.ndarray, ...]:
         return (
             self.bid_prices,
+            self.bid_depth,
             self.bid_near_size,
             self.bid_opp_size,
             self.bid_survival_time,
@@ -63,6 +66,7 @@ class SimulationResult:
             self.bid_result,
             self.bid_spread,
             self.ask_prices,
+            self.ask_depth,
             self.ask_near_size,
             self.ask_opp_size,
             self.ask_survival_time,
@@ -88,7 +92,7 @@ class SimulationRequest:
     time_step: float
     base_tick: float
     resolved_time: float
-    depth: int = 0
+    depths: list[int]
 
     def __post_init__(self) -> None:
         if not self.algorithm:
@@ -99,8 +103,16 @@ class SimulationRequest:
             raise ValueError("Simulation base_tick must be a positive finite value.")
         if not math.isfinite(self.resolved_time) or self.resolved_time < 0:
             raise ValueError("Simulation resolved_time must be a non-negative finite value.")
-        if not isinstance(self.depth, int) or self.depth < 0:
-            raise ValueError("Simulation depth must be a non-negative integer.")
+        if not isinstance(self.depths, list) or not self.depths:
+            raise ValueError("Simulation depths must be a non-empty list of non-negative integers.")
+
+        normalized_depths: list[int] = []
+        for depth in self.depths:
+            if not isinstance(depth, int) or depth < 0:
+                raise ValueError("Simulation depths must be a non-empty list of non-negative integers.")
+            normalized_depths.append(depth)
+
+        object.__setattr__(self, "depths", sorted(set(normalized_depths)))
 
 
 @dataclass(frozen=True)

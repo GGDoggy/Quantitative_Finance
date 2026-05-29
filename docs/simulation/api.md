@@ -89,3 +89,8 @@ request = SimulationRequest(
 result = simulate_batch(batches[0], request, Path("data/preprocessed"))
 print(result.output_path)
 ```
+## Profit timing
+
+- `result == 1`: profit is sampled from `fill_time + resolved_time`
+- `result == 0`: profit is sampled from `cancel_time + resolved_time`
+- `result == -1`: profit remains `NaN`

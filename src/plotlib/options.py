@@ -94,6 +94,7 @@ class DashboardSimulationHeatmapSettings:
 class PlotRenderOptions:
     cost: float | None = None
     simulation_heatmap_settings: SimulationHeatmapSettings | None = None
+    simulation_depth: int | None = None
 
 
 def _read_bool(value: Any, default: bool) -> bool:

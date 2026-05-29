@@ -18,11 +18,13 @@ from .types import SimulationArraysV1, normalize_simulation_arrays_to_v1
 
 
 SIMULATION_REQUIRED_KEYS = (
+    "bid_depth",
     "bid_near_size",
     "bid_opp_size",
     "bid_mid_profit",
     "bid_micro_profit",
     "bid_result",
+    "ask_depth",
     "ask_near_size",
     "ask_opp_size",
     "ask_mid_profit",
@@ -37,15 +39,33 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
 
     for path in paths:
         with np.load(path, allow_pickle=False) as data:
-            missing_keys = [key for key in SIMULATION_REQUIRED_KEYS if key not in data.files]
+            missing_keys = [
+                key
+                for key in SIMULATION_REQUIRED_KEYS
+                if key not in {"bid_depth", "ask_depth"} and key not in data.files
+            ]
             if missing_keys:
                 raise KeyError(f"Simulation file {Path(path).name} is missing required key(s): {', '.join(missing_keys)}")
-            chunks["bid_near_size"].append(np.asarray(data["bid_near_size"], dtype=float))
+            bid_near_size = np.asarray(data["bid_near_size"], dtype=float)
+            ask_near_size = np.asarray(data["ask_near_size"], dtype=float)
+            if "bid_depth" in data.files:
+                bid_depth = np.asarray(data["bid_depth"], dtype=int)
+            else:
+                fallback_depth = int(np.asarray(data["depth"]).item()) if "depth" in data.files else 0
+                bid_depth = np.full(bid_near_size.shape, fallback_depth, dtype=int)
+            if "ask_depth" in data.files:
+                ask_depth = np.asarray(data["ask_depth"], dtype=int)
+            else:
+                fallback_depth = int(np.asarray(data["depth"]).item()) if "depth" in data.files else 0
+                ask_depth = np.full(ask_near_size.shape, fallback_depth, dtype=int)
+            chunks["bid_depth"].append(bid_depth)
+            chunks["bid_near_size"].append(bid_near_size)
             chunks["bid_opp_size"].append(np.asarray(data["bid_opp_size"], dtype=float))
             chunks["bid_mid_profit"].append(np.asarray(data["bid_mid_profit"], dtype=float))
             chunks["bid_micro_profit"].append(np.asarray(data["bid_micro_profit"], dtype=float))
             chunks["bid_result"].append(np.asarray(data["bid_result"], dtype=int))
-            chunks["ask_near_size"].append(np.asarray(data["ask_near_size"], dtype=float))
+            chunks["ask_depth"].append(ask_depth)
+            chunks["ask_near_size"].append(ask_near_size)
             chunks["ask_opp_size"].append(np.asarray(data["ask_opp_size"], dtype=float))
             chunks["ask_mid_profit"].append(np.asarray(data["ask_mid_profit"], dtype=float))
             chunks["ask_micro_profit"].append(np.asarray(data["ask_micro_profit"], dtype=float))
@@ -53,11 +73,13 @@ def load_simulation_arrays(paths: Iterable[Path | str]):
 
     return normalize_simulation_arrays_to_v1(
         {
+            "bid_depth": np.concatenate(chunks["bid_depth"]) if chunks["bid_depth"] else np.array([], dtype=int),
             "bid_near_size": np.concatenate(chunks["bid_near_size"]) if chunks["bid_near_size"] else np.array([], dtype=float),
             "bid_opp_size": np.concatenate(chunks["bid_opp_size"]) if chunks["bid_opp_size"] else np.array([], dtype=float),
             "bid_mid_profit": np.concatenate(chunks["bid_mid_profit"]) if chunks["bid_mid_profit"] else np.array([], dtype=float),
             "bid_micro_profit": np.concatenate(chunks["bid_micro_profit"]) if chunks["bid_micro_profit"] else np.array([], dtype=float),
             "bid_result": np.concatenate(chunks["bid_result"]) if chunks["bid_result"] else np.array([], dtype=int),
+            "ask_depth": np.concatenate(chunks["ask_depth"]) if chunks["ask_depth"] else np.array([], dtype=int),
             "ask_near_size": np.concatenate(chunks["ask_near_size"]) if chunks["ask_near_size"] else np.array([], dtype=float),
             "ask_opp_size": np.concatenate(chunks["ask_opp_size"]) if chunks["ask_opp_size"] else np.array([], dtype=float),
             "ask_mid_profit": np.concatenate(chunks["ask_mid_profit"]) if chunks["ask_mid_profit"] else np.array([], dtype=float),
@@ -71,6 +93,26 @@ def load_simulation_arrays_from_metadata(
     simulation_paths: Iterable[Path | str],
 ):
     return load_simulation_arrays(simulation_paths)
+
+
+def filter_simulation_arrays_by_depth(
+    simulation_arrays: SimulationArraysV1,
+    selected_depth: int | None,
+) -> SimulationArraysV1:
+    if selected_depth is None:
+        return simulation_arrays
+
+    filtered: dict[str, np.ndarray | str] = {
+        "schema_version": simulation_arrays["schema_version"]
+    }
+    for side in ("bid", "ask"):
+        depth_key = f"{side}_depth"
+        side_mask = np.asarray(simulation_arrays[depth_key], dtype=int) == selected_depth
+        for key, values in simulation_arrays.items():
+            if key == "schema_version" or not key.startswith(f"{side}_"):
+                continue
+            filtered[key] = np.asarray(values)[side_mask]
+    return normalize_simulation_arrays_to_v1(filtered)
 
 
 def bin_edges(
@@ -325,6 +367,10 @@ def build_fill_probability_view(
         raise PayloadSchemaVersionError(
             "simulation arrays", "1", simulation_arrays.get("schema_version")
         )
+    simulation_arrays = filter_simulation_arrays_by_depth(
+        simulation_arrays,
+        render_options.simulation_depth if render_options is not None else None,
+    )
 
     shared_count_zmax = _shared_count_zmax(simulation_arrays, settings)
     probability_zmin = settings.metric_range.min
@@ -513,6 +559,10 @@ def build_profit_view(
         raise PayloadSchemaVersionError(
             "simulation arrays", "1", simulation_arrays.get("schema_version")
         )
+    simulation_arrays = filter_simulation_arrays_by_depth(
+        simulation_arrays,
+        render_options.simulation_depth if render_options is not None else None,
+    )
 
     bid_near_edges, bid_opp_edges, bid_profit, bid_sample_count = _grid_for_side(
         simulation_arrays,
@@ -755,6 +805,10 @@ def build_cost_fill_probability_view(
         raise PayloadSchemaVersionError(
             "simulation arrays", "1", simulation_arrays.get("schema_version")
         )
+    simulation_arrays = filter_simulation_arrays_by_depth(
+        simulation_arrays,
+        render_options.simulation_depth if render_options is not None else None,
+    )
 
     bid_near_edges, bid_opp_edges, bid_probability, bid_sample_count = _conditional_grid_for_side(
         simulation_arrays,

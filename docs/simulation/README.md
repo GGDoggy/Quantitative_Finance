@@ -47,3 +47,8 @@ RawBatch
 ## 平行執行
 
 `simulate_batches()` 在 dataset 數量大於 1 時會使用 `ProcessPoolExecutor`，worker 數量由 `get_default_worker_count()` 依 `os.cpu_count()` 與任務數決定。
+## Profit timing
+
+- `result == 1`: profit is sampled from `fill_time + resolved_time`
+- `result == 0`: profit is sampled from `cancel_time + resolved_time`
+- `result == -1`: profit remains `NaN`
