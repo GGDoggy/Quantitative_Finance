@@ -115,7 +115,8 @@ class OrderbookDashboard:
             name="Raw batches for simulation",
             options=[],
             sizing_mode="stretch_width",
-            min_height=180,
+            height=180,
+            css_classes=["qf-fixed-multichoice"],
         )
         self.simulation_select_all_button = pn.widgets.Button(
             name="Select All",
@@ -257,6 +258,13 @@ class OrderbookDashboard:
             visible=False,
             disabled=True,
         )
+        self.sample_color_log_checkbox = pn.widgets.Checkbox(
+            name="Use log scale for sample-count colors",
+            value=False,
+            sizing_mode="stretch_width",
+            visible=False,
+            disabled=True,
+        )
         self.sample_color_min_input = pn.widgets.FloatInput(
             name="Sample-count color min",
             value=0.0,
@@ -301,6 +309,9 @@ class OrderbookDashboard:
         self.preprocess_progress = pn.pane.Markdown(
             "No preprocess job running.",
             sizing_mode="stretch_width",
+            height=240,
+            min_height=240,
+            css_classes=["qf-scrollable-progress"],
         )
         self.simulation_button = pn.widgets.Button(
             name="Run Simulation",
@@ -317,6 +328,9 @@ class OrderbookDashboard:
         self.simulation_progress = pn.pane.Markdown(
             "No simulation job running.",
             sizing_mode="stretch_width",
+            height=240,
+            min_height=240,
+            css_classes=["qf-scrollable-progress"],
         )
         self.plot_area = pn.Column(
             pn.pane.Markdown(
@@ -374,6 +388,9 @@ class OrderbookDashboard:
             self._handle_simulation_heatmap_setting_change, "value"
         )
         self.sample_color_auto_checkbox.param.watch(
+            self._handle_simulation_heatmap_setting_change, "value"
+        )
+        self.sample_color_log_checkbox.param.watch(
             self._handle_simulation_heatmap_setting_change, "value"
         )
         self.sample_color_min_input.param.watch(
@@ -1007,7 +1024,10 @@ class OrderbookDashboard:
         )
 
         if self.sample_color_auto_checkbox.value:
-            sample_count_range = OptionalColorRange(auto=True)
+            sample_count_range = OptionalColorRange(
+                auto=True,
+                use_log_color_scale=bool(self.sample_color_log_checkbox.value),
+            )
         else:
             sample_min = self._read_required_finite_float(
                 self.sample_color_min_input.value, "Sample-count color min"
@@ -1025,6 +1045,7 @@ class OrderbookDashboard:
                 auto=False,
                 min=sample_min,
                 max=sample_max,
+                use_log_color_scale=bool(self.sample_color_log_checkbox.value),
             )
 
         if group_key == "profit":
@@ -1084,6 +1105,7 @@ class OrderbookDashboard:
                 self.metric_color_max_input,
                 self.metric_color_limit_input,
                 self.sample_color_auto_checkbox,
+                self.sample_color_log_checkbox,
                 self.sample_color_min_input,
                 self.sample_color_max_input,
             ):
@@ -1120,6 +1142,9 @@ class OrderbookDashboard:
                 self.metric_color_limit_input.disabled = True
 
             self.sample_color_auto_checkbox.value = settings.sample_count_range.auto
+            self.sample_color_log_checkbox.value = (
+                settings.sample_count_range.use_log_color_scale
+            )
             self.sample_color_min_input.value = (
                 settings.sample_count_range.min
                 if settings.sample_count_range.min is not None
@@ -1996,6 +2021,7 @@ class OrderbookDashboard:
             self.metric_color_max_input,
             self.metric_color_limit_input,
             self.sample_color_auto_checkbox,
+            self.sample_color_log_checkbox,
             self.sample_color_min_input,
             self.sample_color_max_input,
             title="Plot controls",

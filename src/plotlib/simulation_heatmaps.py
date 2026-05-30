@@ -151,6 +151,10 @@ def heatmap_trace(
     colorbar_y: float | None = None,
     colorbar_len: float | None = None,
     use_log_bins: bool = True,
+    hover_label: str = "Value",
+    hover_values: np.ndarray | None = None,
+    colorbar_tickvals: list[float] | None = None,
+    colorbar_ticktext: list[str] | None = None,
 ) -> go.Heatmap:
     colorbar = None
     if colorbar_title is not None:
@@ -161,11 +165,22 @@ def heatmap_trace(
             colorbar["y"] = colorbar_y
         if colorbar_len is not None:
             colorbar["len"] = colorbar_len
+        if colorbar_tickvals is not None:
+            colorbar["tickvals"] = colorbar_tickvals
+        if colorbar_ticktext is not None:
+            colorbar["ticktext"] = colorbar_ticktext
+
+    hover_value_token = "%{z}"
+    customdata = None
+    if hover_values is not None:
+        customdata = hover_values.T
+        hover_value_token = "%{customdata}"
 
     return go.Heatmap(
         x=bin_centers(near_edges, use_log_bins=use_log_bins),
         y=bin_centers(opp_edges, use_log_bins=use_log_bins),
         z=values.T,
+        customdata=customdata,
         colorscale=colorscale,
         zmin=zmin,
         zmax=zmax,
@@ -173,7 +188,10 @@ def heatmap_trace(
         name=name,
         showscale=showscale,
         colorbar=colorbar,
-        hovertemplate="Near Size=%{x}<br>Opp Size=%{y}<br>%{z}<extra></extra>",
+        hovertemplate=(
+            f"Near Size=%{{x}}<br>Opp Size=%{{y}}<br>{hover_label}="
+            f"{hover_value_token}<extra></extra>"
+        ),
     )
 
 
@@ -189,6 +207,73 @@ def shared_sample_count_zmax(*sample_counts: np.ndarray) -> float | None:
     if shared_limit <= 0:
         return None
     return shared_limit
+
+
+def _sample_count_color_values(
+    sample_count: np.ndarray,
+    *,
+    use_log_color_scale: bool,
+) -> np.ndarray:
+    if not use_log_color_scale:
+        return sample_count
+    log_values = np.full_like(sample_count, np.nan, dtype=float)
+    positive_mask = np.isfinite(sample_count) & (sample_count > 0)
+    log_values[positive_mask] = np.log10(sample_count[positive_mask])
+    return log_values
+
+
+def _sample_count_color_limit(
+    value: float | None,
+    *,
+    use_log_color_scale: bool,
+    is_minimum: bool,
+) -> float | None:
+    if value is None:
+        return None
+    if not use_log_color_scale:
+        return value
+    if value <= 0:
+        return 0.0 if is_minimum else None
+    return float(np.log10(value))
+
+
+def _format_sample_count_label(value: float) -> str:
+    if value >= 1 and np.isclose(value, round(value)):
+        return str(int(round(value)))
+    return format(value, "g")
+
+
+def _sample_count_colorbar_ticks(
+    zmin: float | None,
+    zmax: float | None,
+    *,
+    use_log_color_scale: bool,
+) -> tuple[list[float] | None, list[str] | None]:
+    if not use_log_color_scale or zmax is None or not np.isfinite(zmax):
+        return None, None
+
+    lower = 0.0 if zmin is None or not np.isfinite(zmin) else float(zmin)
+    upper = float(zmax)
+    if upper < lower:
+        return None, None
+
+    tick_pairs: list[tuple[float, str]] = []
+
+    def add_tick(log_value: float) -> None:
+        if not np.isfinite(log_value) or log_value < lower or log_value > upper:
+            return
+        if any(np.isclose(log_value, existing, atol=1e-9) for existing, _ in tick_pairs):
+            return
+        tick_pairs.append((log_value, _format_sample_count_label(10**log_value)))
+
+    add_tick(lower)
+    start_exp = int(np.floor(lower))
+    end_exp = int(np.ceil(upper))
+    for exponent in range(start_exp, end_exp + 1):
+        add_tick(float(exponent))
+    add_tick(upper)
+    tick_pairs.sort(key=lambda pair: pair[0])
+    return [value for value, _ in tick_pairs], [label for _, label in tick_pairs]
 
 
 def apply_square_heatmap_axes(figure, settings) -> None:
@@ -286,6 +371,15 @@ def _add_fill_probability_traces(
         size_max=settings.axis.size_max,
         use_log_bins=settings.axis.use_log_bins,
     )
+    count_values = _sample_count_color_values(
+        sample_count,
+        use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+    )
+    count_tickvals, count_ticktext = _sample_count_colorbar_ticks(
+        count_zmin,
+        count_zmax,
+        use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+    )
 
     figure.add_trace(
         heatmap_trace(
@@ -302,6 +396,7 @@ def _add_fill_probability_traces(
             colorbar_y=probability_colorbar_y if show_probability_scale else None,
             colorbar_len=0.34 if show_probability_scale else None,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Fill Probability",
         ),
         row=1,
         col=probability_col,
@@ -310,7 +405,7 @@ def _add_fill_probability_traces(
         heatmap_trace(
             near_edges,
             opp_edges,
-            sample_count,
+            count_values,
             "Magma",
             name=count_title,
             zmin=count_zmin,
@@ -321,6 +416,10 @@ def _add_fill_probability_traces(
             colorbar_y=count_colorbar_y if show_count_scale else None,
             colorbar_len=0.34 if show_count_scale else None,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Sample Count",
+            hover_values=sample_count,
+            colorbar_tickvals=count_tickvals if show_count_scale else None,
+            colorbar_ticktext=count_ticktext if show_count_scale else None,
         ),
         row=2,
         col=count_col,
@@ -376,14 +475,30 @@ def build_fill_probability_view(
     probability_zmin = settings.metric_range.min
     probability_zmax = settings.metric_range.max
     count_zmin = (
-        settings.sample_count_range.min
+        _sample_count_color_limit(
+            settings.sample_count_range.min,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=True,
+        )
         if not settings.sample_count_range.auto
-        else 0.0
+        else _sample_count_color_limit(
+            0.0,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=True,
+        )
     )
     count_zmax = (
-        settings.sample_count_range.max
+        _sample_count_color_limit(
+            settings.sample_count_range.max,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=False,
+        )
         if not settings.sample_count_range.auto
-        else shared_count_zmax
+        else _sample_count_color_limit(
+            shared_count_zmax,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=False,
+        )
     )
 
     figure = make_subplots(
@@ -583,16 +698,37 @@ def build_profit_view(
         else _shared_profit_limit(bid_profit, ask_profit)
     )
     shared_count_zmax = (
-        settings.sample_count_range.max
+        _sample_count_color_limit(
+            settings.sample_count_range.max,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=False,
+        )
         if not settings.sample_count_range.auto
-        else shared_sample_count_zmax(bid_sample_count, ask_sample_count)
+        else _sample_count_color_limit(
+            shared_sample_count_zmax(bid_sample_count, ask_sample_count),
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=False,
+        )
     )
     count_zmin = (
-        settings.sample_count_range.min
+        _sample_count_color_limit(
+            settings.sample_count_range.min,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=True,
+        )
         if not settings.sample_count_range.auto
-        else 0.0
+        else _sample_count_color_limit(
+            0.0,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=True,
+        )
     )
     metric_label = _metric_label(metric_key)
+    count_tickvals, count_ticktext = _sample_count_colorbar_ticks(
+        count_zmin,
+        shared_count_zmax,
+        use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+    )
 
     figure = make_subplots(
         rows=2,
@@ -623,6 +759,7 @@ def build_profit_view(
             colorbar_y=0.79,
             colorbar_len=0.34,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label=metric_label,
         ),
         row=1,
         col=1,
@@ -639,6 +776,7 @@ def build_profit_view(
             zmid=0.0,
             showscale=False,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label=metric_label,
         ),
         row=1,
         col=2,
@@ -647,7 +785,10 @@ def build_profit_view(
         heatmap_trace(
             bid_near_edges,
             bid_opp_edges,
-            bid_sample_count,
+            _sample_count_color_values(
+                bid_sample_count,
+                use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            ),
             "Magma",
             name="Bid Sample Count",
             zmin=count_zmin,
@@ -658,6 +799,10 @@ def build_profit_view(
             colorbar_y=0.21,
             colorbar_len=0.34,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Sample Count",
+            hover_values=bid_sample_count,
+            colorbar_tickvals=count_tickvals,
+            colorbar_ticktext=count_ticktext,
         ),
         row=2,
         col=1,
@@ -666,13 +811,18 @@ def build_profit_view(
         heatmap_trace(
             ask_near_edges,
             ask_opp_edges,
-            ask_sample_count,
+            _sample_count_color_values(
+                ask_sample_count,
+                use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            ),
             "Magma",
             name="Ask Sample Count",
             zmin=count_zmin,
             zmax=shared_count_zmax,
             showscale=False,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Sample Count",
+            hover_values=ask_sample_count,
         ),
         row=2,
         col=2,
@@ -825,16 +975,37 @@ def build_cost_fill_probability_view(
         settings,
     )
     shared_count_zmax = (
-        settings.sample_count_range.max
+        _sample_count_color_limit(
+            settings.sample_count_range.max,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=False,
+        )
         if not settings.sample_count_range.auto
-        else shared_sample_count_zmax(bid_sample_count, ask_sample_count)
+        else _sample_count_color_limit(
+            shared_sample_count_zmax(bid_sample_count, ask_sample_count),
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=False,
+        )
     )
     count_zmin = (
-        settings.sample_count_range.min
+        _sample_count_color_limit(
+            settings.sample_count_range.min,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=True,
+        )
         if not settings.sample_count_range.auto
-        else 0.0
+        else _sample_count_color_limit(
+            0.0,
+            use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            is_minimum=True,
+        )
     )
     metric_label = _conditional_metric_label(metric_key)
+    count_tickvals, count_ticktext = _sample_count_colorbar_ticks(
+        count_zmin,
+        shared_count_zmax,
+        use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+    )
 
     figure = make_subplots(
         rows=2,
@@ -864,6 +1035,7 @@ def build_cost_fill_probability_view(
             colorbar_y=0.79,
             colorbar_len=0.34,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Fill Probability",
         ),
         row=1,
         col=1,
@@ -879,6 +1051,7 @@ def build_cost_fill_probability_view(
             zmax=settings.metric_range.max,
             showscale=False,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Fill Probability",
         ),
         row=1,
         col=2,
@@ -887,7 +1060,10 @@ def build_cost_fill_probability_view(
         heatmap_trace(
             bid_near_edges,
             bid_opp_edges,
-            bid_sample_count,
+            _sample_count_color_values(
+                bid_sample_count,
+                use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            ),
             "Magma",
             name="Bid Sample Count",
             zmin=count_zmin,
@@ -898,6 +1074,10 @@ def build_cost_fill_probability_view(
             colorbar_y=0.21,
             colorbar_len=0.34,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Sample Count",
+            hover_values=bid_sample_count,
+            colorbar_tickvals=count_tickvals,
+            colorbar_ticktext=count_ticktext,
         ),
         row=2,
         col=1,
@@ -906,13 +1086,18 @@ def build_cost_fill_probability_view(
         heatmap_trace(
             ask_near_edges,
             ask_opp_edges,
-            ask_sample_count,
+            _sample_count_color_values(
+                ask_sample_count,
+                use_log_color_scale=settings.sample_count_range.use_log_color_scale,
+            ),
             "Magma",
             name="Ask Sample Count",
             zmin=count_zmin,
             zmax=shared_count_zmax,
             showscale=False,
             use_log_bins=settings.axis.use_log_bins,
+            hover_label="Sample Count",
+            hover_values=ask_sample_count,
         ),
         row=2,
         col=2,

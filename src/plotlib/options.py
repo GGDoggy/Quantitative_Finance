@@ -28,6 +28,7 @@ class OptionalColorRange:
     auto: bool = True
     min: float | None = None
     max: float | None = None
+    use_log_color_scale: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,7 @@ def _optional_range_from_dict(payload: Any) -> OptionalColorRange:
         auto=_read_bool(payload.get("auto"), True),
         min=_read_float(payload.get("min"), None),
         max=_read_float(payload.get("max"), None),
+        use_log_color_scale=_read_bool(payload.get("use_log_color_scale"), False),
     )
 
 

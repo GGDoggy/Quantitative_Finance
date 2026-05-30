@@ -75,6 +75,53 @@ body, .bk, .pn-template {
   overflow: visible !important;
 }
 
+.qf-fixed-multichoice {
+  height: 180px;
+}
+
+.qf-fixed-multichoice .choices {
+  height: 100%;
+  margin-bottom: 0;
+}
+
+.qf-fixed-multichoice .choices__inner {
+  display: block;
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-content: flex-start;
+  scrollbar-gutter: stable;
+}
+
+.qf-scrollable-progress {
+  height: 240px;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.35rem;
+  scrollbar-gutter: stable;
+}
+
+.qf-scrollable-progress > div {
+  min-height: 100%;
+}
+
+.qf-scrollable-progress p,
+.qf-scrollable-progress ul,
+.qf-scrollable-progress ol {
+  margin-bottom: 0.6rem;
+}
+
+.qf-scrollable-progress ul,
+.qf-scrollable-progress ol {
+  padding-left: 1.35rem;
+}
+
+.qf-scrollable-progress li + li {
+  margin-top: 0.35rem;
+}
+
 .qf-plot-controls {
   position: relative;
   z-index: 30;
