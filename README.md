@@ -249,7 +249,7 @@ Currently registered algorithms:
 Simulation outputs are currently written to:
 
 ```text
-data/preprocessed/{product_id}-{timestamp}-{time_step}-resolved-{resolved_time}-simulation-{algorithm}.npz
+data/preprocessed/simulation-{algorithm}-{simulation_timestamp}-{seq_num}.npz
 ```
 
 ## Important Notes

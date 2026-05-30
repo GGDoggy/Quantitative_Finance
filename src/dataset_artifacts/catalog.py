@@ -18,7 +18,7 @@ _PREPROCESSED_RE = re.compile(
     rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})-orderbook_for_plot\.npz$"
 )
 _SIMULATION_RE = re.compile(
-    r"^simulation-(?P<algorithm>.+)-(?P<simulation_timestamp>\d{8}\.\d{6}\.\d{3})\.npz$"
+    r"^simulation-(?P<algorithm>.+)-(?P<simulation_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
 )
 
 DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
@@ -26,6 +26,7 @@ SIMULATION_TIMESTAMP_RE = re.compile(r"^\d{8}\.\d{6}\.\d{3}$")
 SIMULATION_METADATA_REQUIRED_KEYS = (
     "algorithm",
     "simulation_timestamp",
+    "seq_num",
     "product_id",
     "timestamp",
     "file_stem",
@@ -76,6 +77,7 @@ class PreprocessedFilenameMetadata:
 class SimulationFilenameMetadata:
     algorithm_name: str
     simulation_timestamp: str
+    seq_num: int
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,7 @@ class SimulationArtifact:
     algorithm_name: str
     path: Path
     simulation_timestamp: str
+    seq_num: int
     time_step_token: str | None = None
     resolved_time: float | None = None
     depths: tuple[int, ...] | None = None
@@ -239,6 +242,7 @@ def parse_simulation_filename(filename: str) -> SimulationFilenameMetadata | Non
     return SimulationFilenameMetadata(
         algorithm_name=match.group("algorithm"),
         simulation_timestamp=match.group("simulation_timestamp"),
+        seq_num=int(match.group("seq_num")),
     )
 
 
@@ -256,13 +260,16 @@ def build_simulation_output_path(
     output_dir: Path | str,
     algorithm_name: str,
     simulation_timestamp: str,
+    seq_num: int,
 ) -> Path:
     if SIMULATION_TIMESTAMP_RE.match(simulation_timestamp) is None:
         raise ValueError(
             "simulation_timestamp must match YYYYMMDD.HHMMSS.mmm: "
             f"{simulation_timestamp!r}"
         )
-    return Path(output_dir) / f"simulation-{algorithm_name}-{simulation_timestamp}.npz"
+    if seq_num < 0:
+        raise ValueError(f"seq_num must be a non-negative integer: {seq_num!r}")
+    return Path(output_dir) / f"simulation-{algorithm_name}-{simulation_timestamp}-{seq_num}.npz"
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
@@ -415,6 +422,7 @@ def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
         metadata = _load_npz_fields(path, (*required_keys, "depth"))
     algorithm_name = _read_required_str(metadata, "algorithm")
     simulation_timestamp = _read_required_str(metadata, "simulation_timestamp")
+    seq_num = _read_required_int(metadata, "seq_num")
     if algorithm_name != filename_metadata.algorithm_name:
         raise ValueError(
             f"Simulation metadata algorithm does not match filename for {path.name}."
@@ -423,6 +431,10 @@ def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
         raise ValueError(
             f"Simulation metadata timestamp does not match filename for {path.name}."
         )
+    if seq_num != filename_metadata.seq_num:
+        raise ValueError(
+            f"Simulation metadata seq_num does not match filename for {path.name}."
+        )
     return SimulationArtifact(
         product_id=_read_required_str(metadata, "product_id"),
         timestamp=_read_required_str(metadata, "timestamp"),
@@ -430,6 +442,7 @@ def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
         algorithm_name=algorithm_name,
         path=path,
         simulation_timestamp=simulation_timestamp,
+        seq_num=seq_num,
         time_step_token=format_time_step(_read_required_float(metadata, "time_step")),
         resolved_time=_read_required_float(metadata, "resolved_time"),
         depths=_read_depths(metadata),

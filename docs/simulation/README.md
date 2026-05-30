@@ -17,7 +17,7 @@ RawBatch
   -> simulate_loaded_data()
   -> SimulationResult
   -> save_result_file()
-  -> data/preprocessed/simulation-*.npz
+  -> data/preprocessed/simulation-{algorithm}-{simulation_timestamp}-{seq_num}.npz
 ```
 
 ## Public API

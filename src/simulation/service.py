@@ -70,8 +70,14 @@ def build_output_path(
     output_path: Path | str,
     algorithm_name: str,
     simulation_timestamp: str,
+    seq_num: int,
 ) -> Path:
-    return build_simulation_output_path(output_path, algorithm_name, simulation_timestamp)
+    return build_simulation_output_path(
+        output_path,
+        algorithm_name,
+        simulation_timestamp,
+        seq_num,
+    )
 
 
 def parse_dataset_groups(data_v3_path: Path | str) -> list[RawBatch]:
@@ -128,6 +134,7 @@ def save_result_file(
     *,
     algorithm_name: str,
     simulation_timestamp: str,
+    seq_num: int,
     dataset: RawBatch,
     time_step: float,
     base_tick: float,
@@ -139,6 +146,7 @@ def save_result_file(
     save_kwargs = {
         "algorithm": algorithm_name,
         "simulation_timestamp": simulation_timestamp,
+        "seq_num": int(seq_num),
         "product_id": dataset.product_id,
         "timestamp": dataset.timestamp,
         "file_stem": dataset.file_stem,
@@ -191,10 +199,12 @@ def simulate_batch(
     output_dir: Path | str,
 ) -> SimulationJobResult:
     simulation_timestamp = generate_simulation_timestamp()
+    seq_num = 0
     output_path = build_output_path(
         output_dir,
         request.algorithm,
         simulation_timestamp,
+        seq_num,
     )
     overwritten = output_path.exists()
     loaded_data = load_raw_dataset(dataset)
@@ -203,6 +213,7 @@ def simulate_batch(
         output_path,
         algorithm_name=request.algorithm,
         simulation_timestamp=simulation_timestamp,
+        seq_num=seq_num,
         dataset=dataset,
         time_step=request.time_step,
         base_tick=request.base_tick,
@@ -214,6 +225,7 @@ def simulate_batch(
         dataset=dataset,
         output_path=saved_path,
         overwritten=overwritten,
+        seq_num=seq_num,
     )
 
 
@@ -226,12 +238,14 @@ def _process_dataset_job(
     dataset: RawBatch,
     output_path: Path | str,
     request: SimulationRequest,
+    simulation_timestamp: str,
+    seq_num: int,
 ) -> SimulationWorkerPayload:
-    simulation_timestamp = generate_simulation_timestamp()
     output_file = build_output_path(
         output_path,
         request.algorithm,
         simulation_timestamp,
+        seq_num,
     )
     overwritten = output_file.exists()
     loaded_data = load_raw_dataset(dataset)
@@ -240,6 +254,7 @@ def _process_dataset_job(
         output_file,
         algorithm_name=request.algorithm,
         simulation_timestamp=simulation_timestamp,
+        seq_num=seq_num,
         dataset=dataset,
         time_step=request.time_step,
         base_tick=request.base_tick,
@@ -251,6 +266,7 @@ def _process_dataset_job(
         file_stem=dataset.file_stem,
         output_file=str(saved_path),
         overwritten=overwritten,
+        seq_num=seq_num,
     )
 
 
@@ -260,12 +276,20 @@ def _run_datasets_in_parallel(
     request: SimulationRequest,
 ) -> list[SimulationWorkerPayload]:
     worker_count = get_default_worker_count(len(selected))
+    simulation_timestamp = generate_simulation_timestamp()
     results: list[SimulationWorkerPayload] = []
     failures: list[tuple[str, Exception]] = []
     with ProcessPoolExecutor(max_workers=worker_count) as executor:
         future_to_dataset = {
-            executor.submit(_process_dataset_job, dataset, output_path, request): dataset
-            for dataset in selected
+            executor.submit(
+                _process_dataset_job,
+                dataset,
+                output_path,
+                request,
+                simulation_timestamp,
+                seq_num,
+            ): dataset
+            for seq_num, dataset in enumerate(selected)
         }
         for future in as_completed(future_to_dataset):
             dataset = future_to_dataset[future]
