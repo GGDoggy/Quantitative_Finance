@@ -11,7 +11,7 @@ This repository is a quantitative finance research project built around Coinbase
 4. `gui/webUI.py`
    Starts the Panel dashboard and ties together catalog discovery, preprocessing, simulation, and interactive plots.
 
-## Current Pipeline
+## Current Pipelinerrr
 
 ```text
 data/v3/*.csv
