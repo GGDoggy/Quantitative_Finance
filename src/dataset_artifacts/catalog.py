@@ -21,6 +21,9 @@ _PREPROCESSED_RE = re.compile(
 _SIMULATION_RE = re.compile(
     r"^simulation-(?P<algorithm>.+)-(?P<simulation_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
 )
+_ANALYZE_RE = re.compile(
+    r"^analyze-(?P<analysis_name>.+)-(?P<analyze_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
+)
 
 DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
 PREPROCESS_METADATA_REQUIRED_KEYS = (
@@ -41,6 +44,14 @@ SIMULATION_METADATA_REQUIRED_KEYS = (
     "time_step",
     "base_tick",
     "resolved_time",
+)
+ANALYZE_METADATA_REQUIRED_KEYS = (
+    "analysis_name",
+    "analyze_timestamp",
+    "seq_num",
+    "product_id",
+    "timestamp",
+    "file_stem",
 )
 DEFAULT_VIEW_ORDER = (
     "orderbook",
@@ -84,6 +95,13 @@ class PreprocessedFilenameMetadata:
 class SimulationFilenameMetadata:
     algorithm_name: str
     simulation_timestamp: str
+    seq_num: int
+
+
+@dataclass(frozen=True)
+class AnalyzeFilenameMetadata:
+    analysis_name: str
+    analyze_timestamp: str
     seq_num: int
 
 
@@ -214,6 +232,16 @@ class DatasetLocator:
         )
 
 
+@dataclass(frozen=True)
+class AnalyzeArtifact:
+    product_id: str
+    timestamp: str
+    analysis_name: str
+    path: Path
+    analyze_timestamp: str
+    seq_num: int
+
+
 def _format_positive_decimal(value: float | str | Decimal, *, field_name: str) -> str:
     try:
         decimal_value = Decimal(str(value))
@@ -272,6 +300,17 @@ def parse_simulation_filename(filename: str) -> SimulationFilenameMetadata | Non
     )
 
 
+def parse_analyze_filename(filename: str) -> AnalyzeFilenameMetadata | None:
+    match = _ANALYZE_RE.match(filename)
+    if match is None:
+        return None
+    return AnalyzeFilenameMetadata(
+        analysis_name=match.group("analysis_name"),
+        analyze_timestamp=match.group("analyze_timestamp"),
+        seq_num=int(match.group("seq_num")),
+    )
+
+
 def build_preprocessed_output_path(
     output_dir: Path | str,
     preprocess_type: str,
@@ -307,6 +346,24 @@ def build_simulation_output_path(
     if seq_num < 0:
         raise ValueError(f"seq_num must be a non-negative integer: {seq_num!r}")
     return Path(output_dir) / f"simulation-{algorithm_name}-{simulation_timestamp}-{seq_num}.npz"
+
+
+def build_analyze_output_path(
+    output_dir: Path | str,
+    analysis_name: str,
+    analyze_timestamp: str,
+    seq_num: int,
+) -> Path:
+    if SIMULATION_TIMESTAMP_RE.match(analyze_timestamp) is None:
+        raise ValueError(
+            "analyze_timestamp must match YYYYMMDD.HHMMSS.mmm: "
+            f"{analyze_timestamp!r}"
+        )
+    if seq_num < 0:
+        raise ValueError(f"seq_num must be a non-negative integer: {seq_num!r}")
+    if not analysis_name:
+        raise ValueError("analysis_name is required.")
+    return Path(output_dir) / f"analyze-{analysis_name}-{analyze_timestamp}-{seq_num}.npz"
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
@@ -528,6 +585,36 @@ def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
     )
 
 
+def _load_analyze_artifact(path: Path) -> AnalyzeArtifact | None:
+    filename_metadata = parse_analyze_filename(path.name)
+    if filename_metadata is None:
+        return None
+    metadata = _load_npz_fields(path, ANALYZE_METADATA_REQUIRED_KEYS)
+    analysis_name = _read_required_str(metadata, "analysis_name")
+    analyze_timestamp = _read_required_str(metadata, "analyze_timestamp")
+    seq_num = _read_required_int(metadata, "seq_num")
+    if analysis_name != filename_metadata.analysis_name:
+        raise ValueError(
+            f"Analyze metadata analysis_name does not match filename for {path.name}."
+        )
+    if analyze_timestamp != filename_metadata.analyze_timestamp:
+        raise ValueError(
+            f"Analyze metadata timestamp does not match filename for {path.name}."
+        )
+    if seq_num != filename_metadata.seq_num:
+        raise ValueError(
+            f"Analyze metadata seq_num does not match filename for {path.name}."
+        )
+    return AnalyzeArtifact(
+        product_id=_read_required_str(metadata, "product_id"),
+        timestamp=_read_required_str(metadata, "timestamp"),
+        analysis_name=analysis_name,
+        path=path,
+        analyze_timestamp=analyze_timestamp,
+        seq_num=seq_num,
+    )
+
+
 def discover_simulation_artifacts(
     preprocessed_dir: Path | str,
     *,
@@ -558,6 +645,28 @@ def discover_simulation_artifacts(
         if algorithm_name is not None and artifact.algorithm_name != algorithm_name:
             continue
         if not _matches_resolved_time(artifact, resolved_time, resolved_time_token):
+            continue
+        artifacts.append(artifact)
+    return tuple(sorted(artifacts, key=lambda artifact: artifact.path.name))
+
+
+def discover_analyze_artifacts(
+    preprocessed_dir: Path | str,
+    *,
+    product_id: str | None = None,
+    timestamp: str | None = None,
+    analysis_name: str | None = None,
+) -> tuple[AnalyzeArtifact, ...]:
+    artifacts: list[AnalyzeArtifact] = []
+    for path in _iter_files(Path(preprocessed_dir), ".npz"):
+        artifact = _load_analyze_artifact(path)
+        if artifact is None:
+            continue
+        if product_id is not None and artifact.product_id != product_id:
+            continue
+        if timestamp is not None and artifact.timestamp != timestamp:
+            continue
+        if analysis_name is not None and artifact.analysis_name != analysis_name:
             continue
         artifacts.append(artifact)
     return tuple(sorted(artifacts, key=lambda artifact: artifact.path.name))
