@@ -1,99 +1,160 @@
 # Preprocess Module Reference
 
-## `src/preprocess/catalog.py`
+## `src/preprocess/__init__.py`
 
-這個模組提供 dashboard 偏向的 catalog 與 payload helper。
+Public re-export surface for preprocess orchestration:
 
-### 主要函式
-
-- `format_time_step(...)`
-  - 包裝 `src.dataset_artifacts.format_time_step()`，改丟 `PreprocessValidationError`
-- `detect_available_views(path, view_specs=None)`
-  - 重新推斷 `.npz` 可支援的 views
-- `find_simulation_files(...)`
-  - 依 product / timestamp / time_step / algorithm 等條件找 simulation `.npz`
-- `has_simulation_file(...)`
-  - 判斷某 base dataset 是否已有 simulation artifact
-- `discover_preprocessed_datasets(preprocessed_dir, ...)`
-  - 直接代理到 `discover_preprocessed_artifacts()`
-- `discover_raw_batches(raw_dir, preprocessed_dir)`
-  - 在 raw discovery 上補 `is_preprocessed`
-- `load_preprocessed_payload(dataset)`
-  - 讀 `.npz` 成 `dict[str, object]`，並做 schema validation
+- `DEFAULT_DEPTH`
+- `PLOT_REGISTRY`
+- `PreprocessContext`
+- `PreprocessBuilderSpec`
+- `preprocess_batch(...)`
+- `preprocess_batches(...)`
+- `PreprocessError`
+- `PreprocessValidationError`
 
 ## `src/preprocess/pipeline.py`
 
-這個模組是實際的 preprocess pipeline。
+Owns the preprocess pipeline that turns one raw batch into one or more `.npz` datasets.
 
-### 主要資料結構
+### Constants
+
+- `DEFAULT_DEPTH`
+  - Default orderbook depth used when the caller does not provide one.
+- `PREPROCESS_TIMEZONE`
+  - Time zone used when generating preprocess timestamps for filenames and metadata.
+
+### Data Models
 
 - `PreprocessContext`
   - `batch`
-  - `time_step`
+  - `depth`
+  - `start_time`
   - `init_rows`
   - `updates_rows`
-  - `trade_rows`
+  - `trades_rows`
 - `PreprocessBuilderSpec`
+  - `preprocess_type`
   - `preprocess_builder`
   - `required_payload_keys`
+  - `available_views`
 
-### 主要函式
+### Functions
 
-- `build_trade_arrays(trade_rows, timestamp)`
-  - 將 raw trades 轉成 numpy arrays
-- `build_trade_payload(context)`
-  - 產生 trades 視圖共用 payload
-- `build_context(batch, time_step)`
-  - 載入 raw batch 並建立 `PreprocessContext`
-- `build_preprocess_context(batch, time_step, loaded_batch=None)`
-  - 允許重用已載入資料
-- `preprocess_batch(batch, output_dir, time_step=DEFAULT_TIME_STEP, builder_registry=None)`
-  - 將單一 batch 寫成 `.npz`
-- `preprocess_batches(batches, output_dir, ...)`
-  - 逐批處理並支援 progress callback
+- `generate_preprocess_timestamp()`
+  - Returns a timestamp string in `YYYYMMDD.HHMMSS.mmm` format using `PREPROCESS_TIMEZONE`.
+- `_validate_depth(depth)`
+  - Rejects non-positive or non-integer depth values.
+- `build_preprocess_context(batch, depth, loaded_batch=None)`
+  - Loads a raw batch and normalizes it into a `PreprocessContext`.
+- `_save_preprocess_payload(...)`
+  - Writes payload data and metadata into a compressed `.npz` file and rediscovers the written artifact.
+- `preprocess_batch(batch, output_dir, depth=DEFAULT_DEPTH, builder_registry=None, preprocess_timestamp=None, seq_num=0)`
+  - Runs every registered preprocess builder for a single raw batch.
+- `preprocess_batches(batches, output_dir, depth=DEFAULT_DEPTH, builder_registry=None, progress_callback=None)`
+  - Processes multiple raw batches and reports progress if requested.
 
 ### `PLOT_REGISTRY`
 
-目前 registry 如下：
+The current registry contains two preprocess builders:
 
 ```python
 {
-    "orderbook": ...,
-    "trades_scatter": ...,
-    "trade_volume_timeline": ...,
+    "orderbook": PreprocessBuilderSpec(
+        preprocess_type="orderbook",
+        ...,
+        available_views=("orderbook",),
+    ),
+    "trade": PreprocessBuilderSpec(
+        preprocess_type="trade",
+        ...,
+        available_views=("trades_scatter", "trade_volume_timeline"),
+    ),
 }
 ```
 
-這裡決定兩件事：
+This registry determines:
 
-- preprocess 會產生哪些 payload
-- dashboard 對 base dataset 可提供哪些 plot 類型
+- Which preprocess dataset files are written.
+- Which payload keys are required for a builder to count as successful.
+- Which view names are embedded into `available_views`.
 
 ## `src/preprocess/orderbook.py`
 
-這個模組負責 orderbook payload 的核心建構邏輯。`pipeline.py` 並不實作 orderbook 細節，而是透過：
+Builds the orderbook dataset payload.
 
-```python
-PreprocessBuilderSpec(
-    preprocess_builder=build_orderbook_payload,
-    required_payload_keys=("price_axis", "time_axis", "data", "bid", "ask"),
-)
-```
+### Functions
 
-把它接進 registry。
+- `update_orderbook(orderbook, price_levels, price, volume, side)`
+  - Applies one level update into the in-memory book representation.
+- `get_bid_ask(orderbook, price_levels)`
+  - Computes the current best bid and ask prices from the signed orderbook array.
+- `_visible_depth_indices(orderbook, depth)`
+  - Selects the currently visible bid and ask levels to keep in the output payload.
+- `build_orderbook_history(init_rows, update_rows, start_time, depth)`
+  - Replays raw orderbook updates and returns:
+    - `price_axis`
+    - `time_axis`
+    - `data`
+    - `bid`
+    - `ask`
+    - `mid`
+- `build_orderbook_payload(context)`
+  - Wraps `build_orderbook_history(...)` into the payload dictionary consumed by the pipeline.
 
-## 例子
+### Output Keys
+
+The current orderbook payload includes:
+
+- `price_axis`
+- `time_axis`
+- `data`
+- `bid`
+- `ask`
+- `mid`
+
+Only the first five keys are currently required by the pipeline contract. `mid` is an additional convenience array.
+
+## `src/preprocess/trade.py`
+
+Builds the trade dataset payload.
+
+### Functions
+
+- `_empty_trade_payload()`
+  - Returns empty typed arrays when a batch has no trades.
+- `_sorted_trade_rows(trade_rows)`
+  - Sorts raw trade rows by event time using a stable sort.
+- `build_trade_payload(context)`
+  - Returns the normalized trade payload used by trade-based views, or empty typed arrays when the batch has no trades.
+
+### Output Keys
+
+- `trade_time`
+- `trade_price`
+- `trade_volume`
+- `trade_side`
+
+## `src/preprocess/exceptions.py`
+
+- `PreprocessError`
+  - Base runtime error for preprocess failures.
+- `PreprocessValidationError`
+  - Raised when preprocess input arguments are invalid.
+
+## Example
 
 ```python
 from pathlib import Path
 
-from src.preprocess import discover_raw_batches, preprocess_batch
+from src.preprocess import preprocess_batch
+from src.raw_batches import discover_raw_batches
 
 raw_dir = Path("data/v3")
-preprocessed_dir = Path("data/preprocessed")
-batches = discover_raw_batches(raw_dir, preprocessed_dir)
+output_dir = Path("data/preprocessed")
+batches = discover_raw_batches(raw_dir)
 
-dataset = preprocess_batch(batches[0], preprocessed_dir)
-print(dataset.path)
-print(dataset.available_views)
+datasets = preprocess_batch(batches[0], output_dir, depth=10)
+for dataset in datasets:
+    print(dataset.preprocess_type, dataset.path.name, dataset.available_views)
 ```

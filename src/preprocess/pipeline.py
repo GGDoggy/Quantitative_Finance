@@ -58,6 +58,8 @@ PLOT_REGISTRY: dict[str, PreprocessBuilderSpec] = {
         available_views=("trades_scatter", "trade_volume_timeline"),
     ),
 }
+
+
 def generate_preprocess_timestamp() -> str:
     now = datetime.now(PREPROCESS_TIMEZONE)
     return f"{now.strftime('%Y%m%d.%H%M%S')}.{now.microsecond // 1000:03d}"
