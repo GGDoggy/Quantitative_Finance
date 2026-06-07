@@ -428,7 +428,8 @@ class OrderbookDashboard:
     def _plot_view_specs() -> tuple[tuple[str, tuple[str, ...]], ...]:
         return tuple(
             (key, spec.required_payload_keys)
-            for key, spec in PLOT_REGISTRY.items()
+            for key, spec in APP_PLOT_REGISTRY.items()
+            if spec.required_payload_keys and not spec.requires_simulation
         )
 
     def refresh_catalog(self) -> None:
@@ -541,11 +542,19 @@ class OrderbookDashboard:
         return str(dataset.path)
 
     @staticmethod
+    def _dataset_descriptor(dataset: PreprocessedDataset) -> str:
+        if dataset.time_step is not None:
+            return f"{format_time_step(dataset.time_step)}s"
+        if dataset.depth is not None:
+            return f"depth={dataset.depth}"
+        return dataset.path.name
+
+    @staticmethod
     def _timestamp_option_label(dataset: PreprocessedDataset) -> str:
         formatted_timestamp = parse_timestamp(dataset.timestamp).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
-        return f"{formatted_timestamp} | {format_time_step(dataset.time_step)}s"
+        return f"{formatted_timestamp} | {OrderbookDashboard._dataset_descriptor(dataset)}"
 
     def _available_timestamp_options(
         self, product_id: str, plot_type: str
@@ -559,7 +568,12 @@ class OrderbookDashboard:
         options: dict[str, str] = {}
         for dataset in sorted(
             datasets_by_key.values(),
-            key=lambda item: (item.timestamp, item.time_step, item.path.name),
+            key=lambda item: (
+                item.timestamp,
+                item.time_step if item.time_step is not None else -1.0,
+                item.depth if item.depth is not None else -1,
+                item.path.name,
+            ),
         ):
             base_label = self._timestamp_option_label(dataset)
             label_counts[base_label] = label_counts.get(base_label, 0) + 1
@@ -784,7 +798,7 @@ class OrderbookDashboard:
             else "None"
         )
         selected_time_step = (
-            f"{format_time_step(selected_dataset.time_step)}s"
+            self._dataset_descriptor(selected_dataset)
             if selected_dataset is not None
             else "None"
         )

@@ -12,17 +12,25 @@ import numpy as np
 from src.raw_batches import parse_timestamp
 
 
+SIMULATION_TIMESTAMP_RE = re.compile(r"^\d{8}\.\d{6}\.\d{3}$")
 TIME_STEP_RE_FRAGMENT = r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
 _PREPROCESSED_RE = re.compile(
-    r"^(?P<product_id>.+)-(?P<timestamp>\d{8}\.\d{6})-"
-    rf"(?P<time_step>{TIME_STEP_RE_FRAGMENT})-orderbook_for_plot\.npz$"
+    r"^preprocess-(?P<preprocess_type>.+)-"
+    r"(?P<preprocess_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
 )
 _SIMULATION_RE = re.compile(
     r"^simulation-(?P<algorithm>.+)-(?P<simulation_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
 )
 
 DEFAULT_RESOLVED_TIME_FALLBACK = 1.0
-SIMULATION_TIMESTAMP_RE = re.compile(r"^\d{8}\.\d{6}\.\d{3}$")
+PREPROCESS_METADATA_REQUIRED_KEYS = (
+    "preprocess_type",
+    "preprocess_timestamp",
+    "seq_num",
+    "product_id",
+    "timestamp",
+    "file_stem",
+)
 SIMULATION_METADATA_REQUIRED_KEYS = (
     "algorithm",
     "simulation_timestamp",
@@ -67,10 +75,9 @@ ViewSpecs = Sequence[tuple[str, Iterable[str]]]
 
 @dataclass(frozen=True)
 class PreprocessedFilenameMetadata:
-    product_id: str
-    timestamp: str
-    time_step: float
-    time_step_token: str
+    preprocess_type: str
+    preprocess_timestamp: str
+    seq_num: int
 
 
 @dataclass(frozen=True)
@@ -98,9 +105,13 @@ class SimulationArtifact:
 class PreprocessedArtifact:
     product_id: str
     timestamp: str
-    time_step: float
     path: Path
     available_views: tuple[str, ...]
+    preprocess_type: str = "orderbook"
+    preprocess_timestamp: str | None = None
+    seq_num: int | None = None
+    depth: int | None = None
+    time_step: float | None = None
     time_step_token: str | None = None
     simulation_artifact: SimulationArtifact | None = None
 
@@ -131,14 +142,20 @@ class PreprocessedArtifact:
     @property
     def display_name(self) -> str:
         formatted = parse_timestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        views = ",".join(self.available_views)
+        details: list[str] = []
+        if self.depth is not None:
+            details.append(f"depth={self.depth}")
+        if self.time_step is not None:
+            details.append(f"{format_time_step(self.time_step)}s")
         simulation_suffix = (
             f" | {self.simulation_artifact.path.stem}"
             if self.simulation_artifact is not None
             else ""
         )
+        views = ",".join(self.available_views)
+        detail_suffix = f" | {' | '.join(details)}" if details else ""
         return (
-            f"{self.product_id} | {formatted} | {format_time_step(self.time_step)}s"
+            f"{self.product_id} | {formatted}{detail_suffix}"
             f"{simulation_suffix} | {views}"
         )
 
@@ -150,8 +167,12 @@ class PreprocessedArtifact:
         return DatasetLocator(
             product_id=self.product_id,
             timestamp=self.timestamp,
-            time_step=self.time_step,
             preprocessed_dir=preprocessed_dir,
+            preprocess_type=self.preprocess_type,
+            preprocess_timestamp=self.preprocess_timestamp,
+            seq_num=self.seq_num,
+            depth=self.depth,
+            time_step=self.time_step,
             time_step_token=self.time_step_token,
             original_path=self.path,
             simulation_artifact=self.simulation_artifact,
@@ -163,8 +184,12 @@ class PreprocessedArtifact:
 class DatasetLocator:
     product_id: str
     timestamp: str
-    time_step: float
     preprocessed_dir: Path
+    preprocess_type: str = "orderbook"
+    preprocess_timestamp: str | None = None
+    seq_num: int | None = None
+    depth: int | None = None
+    time_step: float | None = None
     time_step_token: str | None = None
     original_path: Path | None = None
     simulation_artifact: SimulationArtifact | None = None
@@ -176,15 +201,17 @@ class DatasetLocator:
     )
 
     @property
-    def base_id(self) -> str:
-        token = self.time_step_token or format_time_step(self.time_step)
-        return f"{self.product_id}-{self.timestamp}-{token}"
-
-    @property
     def path(self) -> Path:
         if self.original_path is not None:
             return self.original_path
-        return self.preprocessed_dir / f"{self.base_id}-orderbook_for_plot.npz"
+        if self.preprocess_timestamp is None or self.seq_num is None:
+            raise ValueError("Cannot resolve dataset path without preprocess metadata.")
+        return build_preprocessed_output_path(
+            self.preprocessed_dir,
+            self.preprocess_type,
+            self.preprocess_timestamp,
+            self.seq_num,
+        )
 
 
 def _format_positive_decimal(value: float | str | Decimal, *, field_name: str) -> str:
@@ -228,10 +255,9 @@ def parse_preprocessed_filename(filename: str) -> PreprocessedFilenameMetadata |
     if match is None:
         return None
     return PreprocessedFilenameMetadata(
-        product_id=match.group("product_id"),
-        timestamp=match.group("timestamp"),
-        time_step=float(match.group("time_step")),
-        time_step_token=match.group("time_step"),
+        preprocess_type=match.group("preprocess_type"),
+        preprocess_timestamp=match.group("preprocess_timestamp"),
+        seq_num=int(match.group("seq_num")),
     )
 
 
@@ -248,12 +274,23 @@ def parse_simulation_filename(filename: str) -> SimulationFilenameMetadata | Non
 
 def build_preprocessed_output_path(
     output_dir: Path | str,
-    product_id: str,
-    timestamp: str,
-    time_step: float,
+    preprocess_type: str,
+    preprocess_timestamp: str,
+    seq_num: int,
 ) -> Path:
-    token = format_time_step(time_step)
-    return Path(output_dir) / f"{product_id}-{timestamp}-{token}-orderbook_for_plot.npz"
+    if SIMULATION_TIMESTAMP_RE.match(preprocess_timestamp) is None:
+        raise ValueError(
+            "preprocess_timestamp must match YYYYMMDD.HHMMSS.mmm: "
+            f"{preprocess_timestamp!r}"
+        )
+    if seq_num < 0:
+        raise ValueError(f"seq_num must be a non-negative integer: {seq_num!r}")
+    if not preprocess_type:
+        raise ValueError("preprocess_type is required.")
+    return (
+        Path(output_dir)
+        / f"preprocess-{preprocess_type}-{preprocess_timestamp}-{seq_num}.npz"
+    )
 
 
 def build_simulation_output_path(
@@ -364,13 +401,13 @@ def _load_npz_fields(path: Path, required_keys: Iterable[str]) -> dict[str, obje
                 )
             return {key: data[key].tolist() for key in required_keys}
     except (OSError, ValueError, zipfile.BadZipFile) as error:
-        raise ValueError(f"Failed to load simulation metadata from {path.name}: {error}") from error
+        raise ValueError(f"Failed to load metadata from {path.name}: {error}") from error
 
 
 def _read_required_str(metadata: Mapping[str, object], field_name: str) -> str:
     value = metadata.get(field_name)
     if not isinstance(value, str) or not value:
-        raise ValueError(f"Invalid simulation metadata field {field_name!r}: {value!r}")
+        raise ValueError(f"Invalid metadata field {field_name!r}: {value!r}")
     return value
 
 
@@ -379,11 +416,9 @@ def _read_required_float(metadata: Mapping[str, object], field_name: str) -> flo
     try:
         numeric = float(value)
     except (TypeError, ValueError) as error:
-        raise ValueError(
-            f"Invalid simulation metadata field {field_name!r}: {value!r}"
-        ) from error
+        raise ValueError(f"Invalid metadata field {field_name!r}: {value!r}") from error
     if not np.isfinite(numeric):
-        raise ValueError(f"Simulation metadata field {field_name!r} must be finite.")
+        raise ValueError(f"Metadata field {field_name!r} must be finite.")
     return numeric
 
 
@@ -392,9 +427,7 @@ def _read_required_int(metadata: Mapping[str, object], field_name: str) -> int:
     try:
         numeric = int(value)
     except (TypeError, ValueError) as error:
-        raise ValueError(
-            f"Invalid simulation metadata field {field_name!r}: {value!r}"
-        ) from error
+        raise ValueError(f"Invalid metadata field {field_name!r}: {value!r}") from error
     return numeric
 
 
@@ -409,6 +442,51 @@ def _read_depths(metadata: Mapping[str, object]) -> tuple[int, ...] | None:
     if "depth" in metadata:
         return (_read_required_int(metadata, "depth"),)
     return None
+
+
+def _load_preprocessed_artifact(
+    path: Path,
+    view_specs: ViewSpecs | None = None,
+) -> PreprocessedArtifact | None:
+    filename_metadata = parse_preprocessed_filename(path.name)
+    if filename_metadata is None:
+        return None
+    try:
+        metadata = _load_npz_fields(path, (*PREPROCESS_METADATA_REQUIRED_KEYS, "depth"))
+    except ValueError:
+        metadata = _load_npz_fields(path, PREPROCESS_METADATA_REQUIRED_KEYS)
+    preprocess_type = _read_required_str(metadata, "preprocess_type")
+    preprocess_timestamp = _read_required_str(metadata, "preprocess_timestamp")
+    seq_num = _read_required_int(metadata, "seq_num")
+    if preprocess_type != filename_metadata.preprocess_type:
+        raise ValueError(
+            f"Preprocess metadata type does not match filename for {path.name}."
+        )
+    if preprocess_timestamp != filename_metadata.preprocess_timestamp:
+        raise ValueError(
+            f"Preprocess metadata timestamp does not match filename for {path.name}."
+        )
+    if seq_num != filename_metadata.seq_num:
+        raise ValueError(
+            f"Preprocess metadata seq_num does not match filename for {path.name}."
+        )
+    return PreprocessedArtifact(
+        product_id=_read_required_str(metadata, "product_id"),
+        timestamp=_read_required_str(metadata, "timestamp"),
+        path=path,
+        available_views=_union_available_views(
+            detect_available_views(path, view_specs=view_specs),
+            preferred_order=DEFAULT_VIEW_ORDER,
+        ),
+        preprocess_type=preprocess_type,
+        preprocess_timestamp=preprocess_timestamp,
+        seq_num=seq_num,
+        depth=(
+            _read_required_int(metadata, "depth")
+            if "depth" in metadata
+            else None
+        ),
+    )
 
 
 def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
@@ -435,15 +513,16 @@ def _load_simulation_artifact(path: Path) -> SimulationArtifact | None:
         raise ValueError(
             f"Simulation metadata seq_num does not match filename for {path.name}."
         )
+    time_step = _read_required_float(metadata, "time_step")
     return SimulationArtifact(
         product_id=_read_required_str(metadata, "product_id"),
         timestamp=_read_required_str(metadata, "timestamp"),
-        time_step=_read_required_float(metadata, "time_step"),
+        time_step=time_step,
         algorithm_name=algorithm_name,
         path=path,
         simulation_timestamp=simulation_timestamp,
         seq_num=seq_num,
-        time_step_token=format_time_step(_read_required_float(metadata, "time_step")),
+        time_step_token=format_time_step(time_step),
         resolved_time=_read_required_float(metadata, "resolved_time"),
         depths=_read_depths(metadata),
     )
@@ -484,107 +563,111 @@ def discover_simulation_artifacts(
     return tuple(sorted(artifacts, key=lambda artifact: artifact.path.name))
 
 
+def _latest_preprocess_artifact(
+    artifacts: list[PreprocessedArtifact],
+    *,
+    preprocess_type: str | None = None,
+) -> PreprocessedArtifact | None:
+    if preprocess_type is not None:
+        artifacts = [
+            artifact for artifact in artifacts if artifact.preprocess_type == preprocess_type
+        ]
+    if not artifacts:
+        return None
+    return max(
+        artifacts,
+        key=lambda artifact: (
+            artifact.preprocess_timestamp or "",
+            artifact.seq_num if artifact.seq_num is not None else -1,
+            artifact.path.name,
+        ),
+    )
+
+
 def discover_preprocessed_artifacts(
     preprocessed_dir: Path | str,
     view_specs: ViewSpecs | None = None,
     simulation_view_keys: tuple[str, ...] = SIMULATION_VIEW_KEYS,
 ) -> list[PreprocessedArtifact]:
     directory = Path(preprocessed_dir)
-    entries: dict[tuple[str, str, float], dict[str, object]] = {}
+    base_artifacts_by_key: dict[tuple[str, str], list[PreprocessedArtifact]] = {}
+    simulation_artifacts_by_key: dict[tuple[str, str], list[SimulationArtifact]] = {}
 
     for path in _iter_files(directory, ".npz"):
-        preprocessed_metadata = parse_preprocessed_filename(path.name)
+        preprocessed_artifact = _load_preprocessed_artifact(path, view_specs=view_specs)
+        if preprocessed_artifact is not None:
+            key = (preprocessed_artifact.product_id, preprocessed_artifact.timestamp)
+            base_artifacts_by_key.setdefault(key, []).append(preprocessed_artifact)
+            continue
+
         simulation_artifact = _load_simulation_artifact(path)
-        if preprocessed_metadata is None and simulation_artifact is None:
+        if simulation_artifact is None:
             continue
-
-        if preprocessed_metadata is not None:
-            key = (
-                preprocessed_metadata.product_id,
-                preprocessed_metadata.timestamp,
-                preprocessed_metadata.time_step,
-            )
-            entry = entries.setdefault(
-                key,
-                {
-                    "product_id": preprocessed_metadata.product_id,
-                    "timestamp": preprocessed_metadata.timestamp,
-                    "time_step": preprocessed_metadata.time_step,
-                    "time_step_token": preprocessed_metadata.time_step_token,
-                    "orderbook_path": None,
-                    "simulation_artifacts": [],
-                    "orderbook_views": (),
-                },
-            )
-            entry["orderbook_path"] = path
-            entry["time_step_token"] = preprocessed_metadata.time_step_token
-            entry["orderbook_views"] = _union_available_views(
-                detect_available_views(path, view_specs=view_specs),
-                preferred_order=DEFAULT_VIEW_ORDER,
-            )
-            continue
-
-        key = (
-            simulation_artifact.product_id,
-            simulation_artifact.timestamp,
-            simulation_artifact.time_step,
-        )
-        entry = entries.setdefault(
-            key,
-            {
-                "product_id": simulation_artifact.product_id,
-                "timestamp": simulation_artifact.timestamp,
-                "time_step": simulation_artifact.time_step,
-                "time_step_token": simulation_artifact.time_step_token,
-                "orderbook_path": None,
-                "simulation_artifacts": [],
-                "orderbook_views": (),
-            },
-        )
-        simulation_artifacts = entry["simulation_artifacts"]
-        if isinstance(simulation_artifacts, list):
-            simulation_artifacts.append(simulation_artifact)
+        key = (simulation_artifact.product_id, simulation_artifact.timestamp)
+        simulation_artifacts_by_key.setdefault(key, []).append(simulation_artifact)
 
     artifacts: list[PreprocessedArtifact] = []
-    for entry in entries.values():
-        orderbook_path = entry["orderbook_path"]
-        time_step_token = str(entry["time_step_token"])
-        orderbook_views = tuple(entry["orderbook_views"])
-        simulation_artifacts = sorted(
-            (
-                artifact
-                for artifact in entry["simulation_artifacts"]
-                if isinstance(artifact, SimulationArtifact)
-            ),
-            key=lambda artifact: artifact.path.name,
+    for base_artifacts in base_artifacts_by_key.values():
+        artifacts.extend(
+            sorted(
+                base_artifacts,
+                key=lambda artifact: (
+                    artifact.timestamp,
+                    artifact.preprocess_timestamp or "",
+                    artifact.seq_num if artifact.seq_num is not None else -1,
+                    artifact.path.name,
+                ),
+            )
         )
 
-        if isinstance(orderbook_path, Path) and not simulation_artifacts:
-            artifacts.append(
-                PreprocessedArtifact(
-                    product_id=str(entry["product_id"]),
-                    timestamp=str(entry["timestamp"]),
-                    time_step=float(entry["time_step"]),
-                    path=orderbook_path,
-                    available_views=orderbook_views,
-                    time_step_token=time_step_token,
+    for key, simulation_artifacts in simulation_artifacts_by_key.items():
+        base_candidates = base_artifacts_by_key.get(key, [])
+        base_artifact = _latest_preprocess_artifact(
+            base_candidates,
+            preprocess_type="orderbook",
+        ) or _latest_preprocess_artifact(base_candidates)
+        for simulation_artifact in sorted(
+            simulation_artifacts,
+            key=lambda artifact: (
+                artifact.time_step,
+                artifact.simulation_timestamp,
+                artifact.seq_num,
+                artifact.path.name,
+            ),
+        ):
+            if base_artifact is None:
+                artifacts.append(
+                    PreprocessedArtifact(
+                        product_id=simulation_artifact.product_id,
+                        timestamp=simulation_artifact.timestamp,
+                        path=simulation_artifact.path,
+                        available_views=_union_available_views(
+                            simulation_view_keys,
+                            preferred_order=DEFAULT_VIEW_ORDER,
+                        ),
+                        time_step=simulation_artifact.time_step,
+                        time_step_token=simulation_artifact.time_step_token,
+                        simulation_artifact=simulation_artifact,
+                    )
                 )
-            )
-            continue
+                continue
 
-        for simulation_artifact in simulation_artifacts:
             artifacts.append(
                 PreprocessedArtifact(
-                    product_id=str(entry["product_id"]),
-                    timestamp=str(entry["timestamp"]),
-                    time_step=float(entry["time_step"]),
-                    path=orderbook_path if isinstance(orderbook_path, Path) else simulation_artifact.path,
+                    product_id=base_artifact.product_id,
+                    timestamp=base_artifact.timestamp,
+                    path=base_artifact.path,
                     available_views=_union_available_views(
-                        orderbook_views if isinstance(orderbook_path, Path) else (),
+                        base_artifact.available_views,
                         simulation_view_keys,
                         preferred_order=DEFAULT_VIEW_ORDER,
                     ),
-                    time_step_token=time_step_token,
+                    preprocess_type=base_artifact.preprocess_type,
+                    preprocess_timestamp=base_artifact.preprocess_timestamp,
+                    seq_num=base_artifact.seq_num,
+                    depth=base_artifact.depth,
+                    time_step=simulation_artifact.time_step,
+                    time_step_token=simulation_artifact.time_step_token,
                     simulation_artifact=simulation_artifact,
                 )
             )
@@ -593,8 +676,11 @@ def discover_preprocessed_artifacts(
         key=lambda artifact: (
             artifact.product_id,
             artifact.timestamp,
-            artifact.time_step,
+            artifact.time_step if artifact.time_step is not None else -1.0,
+            artifact.preprocess_timestamp or "",
+            artifact.seq_num if artifact.seq_num is not None else -1,
             artifact.simulation_path.name if artifact.simulation_path is not None else "",
+            artifact.path.name,
         )
     )
     return artifacts
