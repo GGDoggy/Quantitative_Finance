@@ -31,6 +31,8 @@ RawBatch
   -> src.dataset_artifacts.discover_preprocessed_artifacts()
 ```
 
+The library pipeline normally writes one artifact per registered preprocess type. A separate repository utility, `result/convert_data.py`, may emit multiple `orderbook` artifacts for the same raw batch when it falls back to chunked conversion after `MemoryError`.
+
 ## Current Outputs
 
 The preprocess pipeline currently writes two dataset types:
@@ -39,6 +41,11 @@ The preprocess pipeline currently writes two dataset types:
   - Provides the `orderbook` view.
 - `trade`
   - Provides the `trades_scatter` and `trade_volume_timeline` views.
+
+## Implementation Notes
+
+- `src.preprocess.orderbook.build_orderbook_history(...)` now tracks active bid and ask indices incrementally instead of scanning the full signed book array after every update.
+- The orderbook builder stores only the visible depth rows needed for the final output matrix, avoiding one full orderbook snapshot copy per update.
 
 ## Public API
 

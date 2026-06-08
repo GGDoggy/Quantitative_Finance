@@ -36,6 +36,7 @@ The current implementation supports one analysis request:
   - Aggregates trade volume between adjacent orderbook updates.
   - Evaluates that traded volume against the visible starting size at each traded price level.
   - Marks a row as fully filled when the interval traded through a better price than the traded level.
+  - Reuses the live bid and ask maps directly at each interval boundary instead of snapshotting the whole book state per interval.
 
 ## Quick Example
 

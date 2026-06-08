@@ -85,12 +85,10 @@ Builds the orderbook dataset payload.
 
 ### Functions
 
-- `update_orderbook(orderbook, price_levels, price, volume, side)`
-  - Applies one level update into the in-memory book representation.
-- `get_bid_ask(orderbook, price_levels)`
-  - Computes the current best bid and ask prices from the signed orderbook array.
-- `_visible_depth_indices(orderbook, depth)`
-  - Selects the currently visible bid and ask levels to keep in the output payload.
+- `update_orderbook(orderbook, price_index, bid_indices, ask_indices, price, volume, side)`
+  - Applies one level update and keeps the active bid and ask index lists synchronized in sorted order.
+- `get_bid_ask(price_levels, bid_indices, ask_indices)`
+  - Computes the current best bid and ask prices from the maintained active index lists.
 - `build_orderbook_history(init_rows, update_rows, start_time, depth)`
   - Replays raw orderbook updates and returns:
     - `price_axis`
@@ -101,6 +99,12 @@ Builds the orderbook dataset payload.
     - `mid`
 - `build_orderbook_payload(context)`
   - Wraps `build_orderbook_history(...)` into the payload dictionary consumed by the pipeline.
+
+### Behavior Notes
+
+- The implementation builds a `price -> index` map once, then updates the signed orderbook array in place.
+- Visible depth selection is incremental: each row stores only the currently visible bid and ask indices instead of copying the full orderbook snapshot.
+- The final `data` matrix is assembled from the union of all visible indices touched across the replayed updates.
 
 ### Output Keys
 

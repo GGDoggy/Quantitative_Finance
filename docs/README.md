@@ -25,6 +25,13 @@ data/v3/*.csv
   -> src.raw_batches.discover_raw_batches()
   -> src.analyze.analyze_batch()
   -> data/preprocessed/analyze-*.npz
+
+data/temp/*.csv
+  -> result/convert_data.py
+  -> src.preprocess.pipeline internal helpers
+  -> src.analyze.analyze_batch()
+  -> data/preprocessed/preprocess-*.npz
+  -> data/preprocessed/analyze-*.npz
 ```
 
 ## Active Packages

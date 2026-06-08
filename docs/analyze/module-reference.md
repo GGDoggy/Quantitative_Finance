@@ -62,11 +62,6 @@ Defines the data contracts that move through the analysis pipeline.
 
 Owns the fill-rate analysis algorithm for one loaded batch.
 
-### Internal Models
-
-- `_IntervalContext`
-  - Snapshot of best prices, best sizes, and book state at the start of one update interval.
-
 ### Functions
 
 - `_sorted_rows(rows)`
@@ -87,18 +82,15 @@ Owns the fill-rate analysis algorithm for one loaded batch.
   - Sorts bid-side grouped prices descending and ask-side grouped prices ascending.
 - `_is_better_than_last(side, price, last_price)`
   - Detects whether a grouped trade price is better than the last traded price seen in the same interval and side.
-- `_starting_volume(context, side, price)`
-  - Returns the visible size at a traded level at interval start.
 - `_fill_rate(penetrated, traded_volume, starting_volume)`
   - Computes fill rate as `1.0`, `traded_volume / starting_volume`, or `NaN`.
-- `_build_interval_context(update_row, bid_levels, ask_levels)`
-  - Captures the interval-start orderbook state after applying the current update row.
 - `analyze_loaded_data(data)`
   - Scans adjacent update intervals, groups trades by side and price inside each interval, and returns the normalized analysis arrays.
 
 ### Behavior Notes
 
 - The algorithm applies each current update row before analyzing the interval until the next update row.
+- Best bid, best ask, spread, opposite top-of-book size, and starting level volume are read directly from the live bid and ask maps for the current interval instead of copying full interval snapshots.
 - Intervals without trades do not produce output rows.
 - If fewer than two updates exist, or if no trades exist, the function returns empty typed arrays.
 - Grouping is per interval, per side, and per traded price.
