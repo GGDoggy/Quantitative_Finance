@@ -84,19 +84,7 @@ def build_orderbook_history(
         asks.append(ask)
         visible_indices.append(_visible_depth_indices(orderbook, depth))
 
-    if not snapshots:
-        empty_time = np.array([], dtype="datetime64[ns]")
-        empty_float = np.array([], dtype=float)
-        return (
-            np.array([], dtype=float),
-            empty_time,
-            np.zeros((0, 0), dtype=float),
-            empty_float,
-            empty_float,
-            empty_float,
-        )
-
-    active_indices = np.unique(np.concatenate(visible_indices)) if visible_indices else np.array([], dtype=int)
+    active_indices = np.unique(np.concatenate(visible_indices))
     if active_indices.size == 0:
         active_price_axis = np.array([], dtype=float)
         data = np.zeros((len(snapshots), 0), dtype=float)
