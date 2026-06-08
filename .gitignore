@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .codex_tmp
 test/*
+.env
