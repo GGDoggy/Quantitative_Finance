@@ -132,7 +132,7 @@ def _save_preprocess_payload(
             temp_path.unlink()
 
     for dataset in discover_preprocessed_artifacts(output_dir):
-        if dataset.path == output_path and dataset.simulation_path is None:
+        if dataset.path == output_path:
             return dataset
 
     raise FileNotFoundError(f"Failed to discover freshly written dataset: {output_path}")
