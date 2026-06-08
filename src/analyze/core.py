@@ -1,23 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
 
 from .models import AnalyzeResult, LoadedAnalyzeData
-
-
-@dataclass(frozen=True)
-class _IntervalContext:
-    start_time: float
-    best_bid_price: float
-    best_bid_size: float
-    best_ask_price: float
-    best_ask_size: float
-    bid_levels: dict[float, float]
-    ask_levels: dict[float, float]
 
 
 def _sorted_rows(rows: Iterable[list[float]]) -> list[list[float]]:
@@ -79,11 +67,6 @@ def _is_better_than_last(side: str, price: float, last_price: float) -> bool:
     return price < last_price and not np.isclose(price, last_price)
 
 
-def _starting_volume(context: _IntervalContext, side: str, price: float) -> float:
-    levels = context.bid_levels if side == "bid" else context.ask_levels
-    return float(levels.get(price, 0.0))
-
-
 def _fill_rate(
     *,
     penetrated: bool,
@@ -95,24 +78,6 @@ def _fill_rate(
     if starting_volume <= 0:
         return np.nan
     return float(traded_volume / starting_volume)
-
-
-def _build_interval_context(
-    update_row: list[float],
-    bid_levels: dict[float, float],
-    ask_levels: dict[float, float],
-) -> _IntervalContext:
-    best_bid_price, best_bid_size = _best_bid(bid_levels)
-    best_ask_price, best_ask_size = _best_ask(ask_levels)
-    return _IntervalContext(
-        start_time=float(update_row[0]),
-        best_bid_price=best_bid_price,
-        best_bid_size=best_bid_size,
-        best_ask_price=best_ask_price,
-        best_ask_size=best_ask_size,
-        bid_levels=dict(bid_levels),
-        ask_levels=dict(ask_levels),
-    )
 
 
 def analyze_loaded_data(data: LoadedAnalyzeData) -> AnalyzeResult:
@@ -146,10 +111,10 @@ def analyze_loaded_data(data: LoadedAnalyzeData) -> AnalyzeResult:
         else:
             _apply_level_update(ask_levels, current_price, current_volume)
 
-        context = _build_interval_context(current_update, bid_levels, ask_levels)
+        interval_start = float(current_update[0])
         interval_end = float(next_update[0])
 
-        while trade_index < trade_count and float(trades[trade_index][0]) < context.start_time:
+        while trade_index < trade_count and float(trades[trade_index][0]) < interval_start:
             trade_index += 1
 
         grouped_volume: dict[tuple[str, float], float] = defaultdict(float)
@@ -168,6 +133,10 @@ def analyze_loaded_data(data: LoadedAnalyzeData) -> AnalyzeResult:
         if not grouped_volume:
             continue
 
+        best_bid_price, best_bid_size = _best_bid(bid_levels)
+        best_ask_price, best_ask_size = _best_ask(ask_levels)
+        spread = _spread(best_bid_price, best_ask_price)
+
         for side in ("bid", "ask"):
             last_price = last_price_by_side.get(side)
             if last_price is None:
@@ -180,16 +149,17 @@ def analyze_loaded_data(data: LoadedAnalyzeData) -> AnalyzeResult:
             for price in side_prices:
                 traded_volume = float(grouped_volume[(side, price)])
                 penetrated = _is_better_than_last(side, price, last_price)
-                starting_volume = _starting_volume(context, side, price)
+                levels = bid_levels if side == "bid" else ask_levels
+                starting_volume = float(levels.get(price, 0.0))
                 rows.append(
                     (
                         price,
                         traded_volume,
-                        context.start_time,
+                        interval_start,
                         side,
                         penetrated,
-                        _spread(context.best_bid_price, context.best_ask_price),
-                        context.best_ask_size if side == "bid" else context.best_bid_size,
+                        spread,
+                        best_ask_size if side == "bid" else best_bid_size,
                         _fill_rate(
                             penetrated=penetrated,
                             traded_volume=traded_volume,
