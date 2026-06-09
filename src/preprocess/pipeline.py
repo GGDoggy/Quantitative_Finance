@@ -3,10 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 import tempfile
-from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -23,7 +21,6 @@ from .trade import build_trade_payload
 
 
 DEFAULT_DEPTH = 10
-PREPROCESS_TIMEZONE = ZoneInfo("Asia/Taipei")
 
 
 @dataclass(frozen=True)
@@ -48,7 +45,15 @@ PLOT_REGISTRY: dict[str, PreprocessBuilderSpec] = {
     "orderbook": PreprocessBuilderSpec(
         preprocess_type="orderbook",
         preprocess_builder=build_orderbook_payload,
-        required_payload_keys=("price_axis", "time_axis", "data", "bid", "ask"),
+        required_payload_keys=(
+            "time_axis",
+            "bid_price",
+            "bid_size",
+            "ask_price",
+            "ask_size",
+            "bid",
+            "ask",
+        ),
         available_views=("orderbook",),
     ),
     "trade": PreprocessBuilderSpec(
@@ -58,11 +63,6 @@ PLOT_REGISTRY: dict[str, PreprocessBuilderSpec] = {
         available_views=("trades_scatter", "trade_volume_timeline"),
     ),
 }
-
-
-def generate_preprocess_timestamp() -> str:
-    now = datetime.now(PREPROCESS_TIMEZONE)
-    return f"{now.strftime('%Y%m%d.%H%M%S')}.{now.microsecond // 1000:03d}"
 
 
 def _validate_depth(depth: int) -> int:
@@ -96,18 +96,15 @@ def _save_preprocess_payload(
     payload: Mapping[str, object],
     available_views: tuple[str, ...],
     preprocess_timestamp: str,
-    seq_num: int,
 ) -> PreprocessedDataset:
     output_path = build_preprocessed_output_path(
         output_dir,
         preprocess_type=preprocess_type,
         preprocess_timestamp=preprocess_timestamp,
-        seq_num=seq_num,
     )
     metadata: dict[str, object] = {
         "preprocess_type": preprocess_type,
         "preprocess_timestamp": preprocess_timestamp,
-        "seq_num": int(seq_num),
         "product_id": context.batch.product_id,
         "timestamp": context.batch.timestamp,
         "file_stem": context.batch.file_stem,
@@ -144,11 +141,10 @@ def preprocess_batch(
     depth: int = DEFAULT_DEPTH,
     builder_registry: Mapping[str, PreprocessBuilderSpec] | None = None,
     preprocess_timestamp: str | None = None,
-    seq_num: int = 0,
 ) -> list[PreprocessedDataset]:
     context = build_preprocess_context(batch, depth)
     registry = PLOT_REGISTRY if builder_registry is None else builder_registry
-    preprocess_timestamp = preprocess_timestamp or generate_preprocess_timestamp()
+    preprocess_timestamp = preprocess_timestamp or batch.timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
     datasets: list[PreprocessedDataset] = []
 
@@ -166,7 +162,6 @@ def preprocess_batch(
                 payload=payload,
                 available_views=spec.available_views,
                 preprocess_timestamp=preprocess_timestamp,
-                seq_num=seq_num,
             )
         )
 
@@ -179,10 +174,10 @@ def preprocess_batches(
     depth: int = DEFAULT_DEPTH,
     builder_registry: Mapping[str, PreprocessBuilderSpec] | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    preprocess_timestamp: str | None = None,
 ) -> list[PreprocessedDataset]:
     results: list[PreprocessedDataset] = []
     total = len(batches)
-    preprocess_timestamp = generate_preprocess_timestamp()
 
     for index, batch in enumerate(batches, start=1):
         if progress_callback is not None:
@@ -193,8 +188,7 @@ def preprocess_batches(
                 output_dir=output_dir,
                 depth=depth,
                 builder_registry=builder_registry,
-                preprocess_timestamp=preprocess_timestamp,
-                seq_num=index - 1,
+                preprocess_timestamp=preprocess_timestamp or batch.timestamp,
             )
         )
 

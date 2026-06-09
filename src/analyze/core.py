@@ -26,7 +26,7 @@ def _initialize_book(init_rows: list[list[float]]) -> tuple[dict[float, float], 
         price = float(price_raw)
         volume = float(volume_raw)
         side = int(side_raw)
-        if side == -1:
+        if side == 1:
             _apply_level_update(bid_levels, price, volume)
         else:
             _apply_level_update(ask_levels, price, volume)
@@ -106,7 +106,7 @@ def analyze_loaded_data(data: LoadedAnalyzeData) -> AnalyzeResult:
         current_price = float(current_update[1])
         current_volume = float(current_update[2])
         current_side = int(current_update[3])
-        if current_side == -1:
+        if current_side == 1:
             _apply_level_update(bid_levels, current_price, current_volume)
         else:
             _apply_level_update(ask_levels, current_price, current_volume)

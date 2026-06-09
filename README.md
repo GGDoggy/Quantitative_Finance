@@ -85,20 +85,19 @@ Important constraints:
 - `analyze_batch(dataset, request, output_dir)`
 - `analyze_batches(datasets, request, output_dir)`
 - `build_output_path(...)`
-- `generate_analyze_timestamp()`
 
 ## Artifact Formats
 
 Preprocess outputs:
 
 ```text
-data/preprocessed/preprocess-{preprocess_type}-{preprocess_timestamp}-{seq_num}.npz
+data/preprocessed/preprocess-{preprocess_type}-{preprocess_timestamp}.npz
 ```
 
 Analyze outputs:
 
 ```text
-data/preprocessed/analyze-{analysis_name}-{analyze_timestamp}-{seq_num}.npz
+data/preprocessed/analyze-{analysis_name}-{analyze_timestamp}.npz
 ```
 
 ## Documentation

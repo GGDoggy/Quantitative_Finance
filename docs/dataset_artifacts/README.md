@@ -14,26 +14,28 @@
 ### Preprocess artifacts
 
 ```text
-preprocess-{preprocess_type}-{preprocess_timestamp}-{seq_num}.npz
+preprocess-{preprocess_type}-{preprocess_timestamp}.npz
 ```
 
 Example:
 
 ```text
-preprocess-orderbook-20260608.120000.123-0.npz
+preprocess-orderbook-20260608.120000.npz
 ```
 
 ### Analyze artifacts
 
 ```text
-analyze-{analysis_name}-{analyze_timestamp}-{seq_num}.npz
+analyze-{analysis_name}-{analyze_timestamp}.npz
 ```
 
 Example:
 
 ```text
-analyze-fill_rate-20260608.120000.123-0.npz
+analyze-fill_rate-20260608.120000.npz
 ```
+
+Old `...mmm-seq.npz` filenames are not part of the current contract and are ignored by discovery.
 
 ## Public API
 
@@ -56,7 +58,6 @@ analyze-fill_rate-20260608.120000.123-0.npz
 - `available_views`
 - `preprocess_type`
 - `preprocess_timestamp`
-- `seq_num`
 - `depth`
 
 ### `DatasetLocator`
@@ -70,7 +71,24 @@ analyze-fill_rate-20260608.120000.123-0.npz
 - `analysis_name`
 - `path`
 - `analyze_timestamp`
-- `seq_num`
+
+## Metadata Contract
+
+Preprocess discovery requires:
+
+- `preprocess_type`
+- `preprocess_timestamp`
+- `product_id`
+- `timestamp`
+- `file_stem`
+
+Analyze discovery requires:
+
+- `analysis_name`
+- `analyze_timestamp`
+- `product_id`
+- `timestamp`
+- `file_stem`
 
 ## View Detection
 
@@ -84,3 +102,10 @@ The built-in preprocess views are:
 - `orderbook`
 - `trades_scatter`
 - `trade_volume_timeline`
+
+For `orderbook`, key inference accepts both:
+
+- The current snapshot contract:
+  - `time_axis`, `bid_price`, `bid_size`, `ask_price`, `ask_size`, `bid`, `ask`
+- The legacy dense-matrix contract:
+  - `price_axis`, `time_axis`, `data`, `bid`, `ask`

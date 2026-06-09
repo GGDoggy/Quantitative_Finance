@@ -12,19 +12,18 @@ import numpy as np
 from src.raw_batches import parse_timestamp
 
 
-ARTIFACT_TIMESTAMP_RE = re.compile(r"^\d{8}\.\d{6}\.\d{3}$")
+ARTIFACT_TIMESTAMP_RE = re.compile(r"^\d{8}\.\d{6}$")
 _PREPROCESSED_RE = re.compile(
     r"^preprocess-(?P<preprocess_type>.+)-"
-    r"(?P<preprocess_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
+    r"(?P<preprocess_timestamp>\d{8}\.\d{6})\.npz$"
 )
 _ANALYZE_RE = re.compile(
-    r"^analyze-(?P<analysis_name>.+)-(?P<analyze_timestamp>\d{8}\.\d{6}\.\d{3})-(?P<seq_num>\d+)\.npz$"
+    r"^analyze-(?P<analysis_name>.+)-(?P<analyze_timestamp>\d{8}\.\d{6})\.npz$"
 )
 
 PREPROCESS_METADATA_REQUIRED_KEYS = (
     "preprocess_type",
     "preprocess_timestamp",
-    "seq_num",
     "product_id",
     "timestamp",
     "file_stem",
@@ -32,7 +31,6 @@ PREPROCESS_METADATA_REQUIRED_KEYS = (
 ANALYZE_METADATA_REQUIRED_KEYS = (
     "analysis_name",
     "analyze_timestamp",
-    "seq_num",
     "product_id",
     "timestamp",
     "file_stem",
@@ -42,8 +40,12 @@ DEFAULT_VIEW_ORDER = (
     "trades_scatter",
     "trade_volume_timeline",
 )
+LEGACY_ORDERBOOK_VIEW_KEYS = frozenset(("price_axis", "time_axis", "data", "bid", "ask"))
+SNAPSHOT_ORDERBOOK_VIEW_KEYS = frozenset(
+    ("time_axis", "bid_price", "bid_size", "ask_price", "ask_size", "bid", "ask")
+)
 DEFAULT_VIEW_SPECS: tuple[tuple[str, frozenset[str]], ...] = (
-    ("orderbook", frozenset(("price_axis", "time_axis", "data", "bid", "ask"))),
+    ("orderbook", SNAPSHOT_ORDERBOOK_VIEW_KEYS),
     (
         "trades_scatter",
         frozenset(("trade_time", "trade_price", "trade_volume", "trade_side")),
@@ -60,14 +62,12 @@ ViewSpecs = Sequence[tuple[str, Iterable[str]]]
 class PreprocessedFilenameMetadata:
     preprocess_type: str
     preprocess_timestamp: str
-    seq_num: int
 
 
 @dataclass(frozen=True)
 class AnalyzeFilenameMetadata:
     analysis_name: str
     analyze_timestamp: str
-    seq_num: int
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,6 @@ class PreprocessedArtifact:
     available_views: tuple[str, ...]
     preprocess_type: str = "orderbook"
     preprocess_timestamp: str | None = None
-    seq_num: int | None = None
     depth: int | None = None
 
     @property
@@ -106,7 +105,6 @@ class PreprocessedArtifact:
             preprocessed_dir=preprocessed_dir,
             preprocess_type=self.preprocess_type,
             preprocess_timestamp=self.preprocess_timestamp,
-            seq_num=self.seq_num,
             depth=self.depth,
             original_path=self.path,
             payload_cache=payload_cache,
@@ -120,7 +118,6 @@ class DatasetLocator:
     preprocessed_dir: Path
     preprocess_type: str = "orderbook"
     preprocess_timestamp: str | None = None
-    seq_num: int | None = None
     depth: int | None = None
     original_path: Path | None = None
     payload_cache: MutableMapping[Path, dict[str, object]] | None = field(
@@ -134,13 +131,12 @@ class DatasetLocator:
     def path(self) -> Path:
         if self.original_path is not None:
             return self.original_path
-        if self.preprocess_timestamp is None or self.seq_num is None:
+        if self.preprocess_timestamp is None:
             raise ValueError("Cannot resolve dataset path without preprocess metadata.")
         return build_preprocessed_output_path(
             self.preprocessed_dir,
             self.preprocess_type,
             self.preprocess_timestamp,
-            self.seq_num,
         )
 
 
@@ -151,7 +147,6 @@ class AnalyzeArtifact:
     analysis_name: str
     path: Path
     analyze_timestamp: str
-    seq_num: int
 
 
 def _format_positive_decimal(value: float | str | Decimal, *, field_name: str) -> str:
@@ -180,7 +175,6 @@ def parse_preprocessed_filename(filename: str) -> PreprocessedFilenameMetadata |
     return PreprocessedFilenameMetadata(
         preprocess_type=match.group("preprocess_type"),
         preprocess_timestamp=match.group("preprocess_timestamp"),
-        seq_num=int(match.group("seq_num")),
     )
 
 
@@ -191,7 +185,6 @@ def parse_analyze_filename(filename: str) -> AnalyzeFilenameMetadata | None:
     return AnalyzeFilenameMetadata(
         analysis_name=match.group("analysis_name"),
         analyze_timestamp=match.group("analyze_timestamp"),
-        seq_num=int(match.group("seq_num")),
     )
 
 
@@ -199,39 +192,30 @@ def build_preprocessed_output_path(
     output_dir: Path | str,
     preprocess_type: str,
     preprocess_timestamp: str,
-    seq_num: int,
 ) -> Path:
     if ARTIFACT_TIMESTAMP_RE.match(preprocess_timestamp) is None:
         raise ValueError(
-            "preprocess_timestamp must match YYYYMMDD.HHMMSS.mmm: "
+            "preprocess_timestamp must match YYYYMMDD.HHMMSS: "
             f"{preprocess_timestamp!r}"
         )
-    if seq_num < 0:
-        raise ValueError(f"seq_num must be a non-negative integer: {seq_num!r}")
     if not preprocess_type:
         raise ValueError("preprocess_type is required.")
-    return (
-        Path(output_dir)
-        / f"preprocess-{preprocess_type}-{preprocess_timestamp}-{seq_num}.npz"
-    )
+    return Path(output_dir) / f"preprocess-{preprocess_type}-{preprocess_timestamp}.npz"
 
 
 def build_analyze_output_path(
     output_dir: Path | str,
     analysis_name: str,
     analyze_timestamp: str,
-    seq_num: int,
 ) -> Path:
     if ARTIFACT_TIMESTAMP_RE.match(analyze_timestamp) is None:
         raise ValueError(
-            "analyze_timestamp must match YYYYMMDD.HHMMSS.mmm: "
+            "analyze_timestamp must match YYYYMMDD.HHMMSS: "
             f"{analyze_timestamp!r}"
         )
-    if seq_num < 0:
-        raise ValueError(f"seq_num must be a non-negative integer: {seq_num!r}")
     if not analysis_name:
         raise ValueError("analysis_name is required.")
-    return Path(output_dir) / f"analyze-{analysis_name}-{analyze_timestamp}-{seq_num}.npz"
+    return Path(output_dir) / f"analyze-{analysis_name}-{analyze_timestamp}.npz"
 
 
 def _iter_files(path: Path, suffix: str) -> Iterable[Path]:
@@ -258,11 +242,18 @@ def detect_available_views(
                 available_views = tuple(str(view) for view in data["available_views"].tolist())
             else:
                 data_keys = set(data.files)
-                available_views = tuple(
+                available_views_list: list[str] = []
+                if (
+                    LEGACY_ORDERBOOK_VIEW_KEYS.issubset(data_keys)
+                    or SNAPSHOT_ORDERBOOK_VIEW_KEYS.issubset(data_keys)
+                ):
+                    available_views_list.append("orderbook")
+                available_views_list.extend(
                     view_key
                     for view_key, required_keys in _normalized_view_specs(view_specs)
-                    if required_keys.issubset(data_keys)
+                    if view_key != "orderbook" and required_keys.issubset(data_keys)
                 )
+                available_views = tuple(available_views_list)
     except (OSError, ValueError, zipfile.BadZipFile):
         return ("orderbook",)
     return available_views or ("orderbook",)
@@ -328,7 +319,6 @@ def _load_preprocessed_artifact(
         metadata = _load_npz_fields(path, PREPROCESS_METADATA_REQUIRED_KEYS)
     preprocess_type = _read_required_str(metadata, "preprocess_type")
     preprocess_timestamp = _read_required_str(metadata, "preprocess_timestamp")
-    seq_num = _read_required_int(metadata, "seq_num")
     if preprocess_type != filename_metadata.preprocess_type:
         raise ValueError(
             f"Preprocess metadata type does not match filename for {path.name}."
@@ -336,10 +326,6 @@ def _load_preprocessed_artifact(
     if preprocess_timestamp != filename_metadata.preprocess_timestamp:
         raise ValueError(
             f"Preprocess metadata timestamp does not match filename for {path.name}."
-        )
-    if seq_num != filename_metadata.seq_num:
-        raise ValueError(
-            f"Preprocess metadata seq_num does not match filename for {path.name}."
         )
     return PreprocessedArtifact(
         product_id=_read_required_str(metadata, "product_id"),
@@ -351,7 +337,6 @@ def _load_preprocessed_artifact(
         ),
         preprocess_type=preprocess_type,
         preprocess_timestamp=preprocess_timestamp,
-        seq_num=seq_num,
         depth=_read_required_int(metadata, "depth") if "depth" in metadata else None,
     )
 
@@ -363,7 +348,6 @@ def _load_analyze_artifact(path: Path) -> AnalyzeArtifact | None:
     metadata = _load_npz_fields(path, ANALYZE_METADATA_REQUIRED_KEYS)
     analysis_name = _read_required_str(metadata, "analysis_name")
     analyze_timestamp = _read_required_str(metadata, "analyze_timestamp")
-    seq_num = _read_required_int(metadata, "seq_num")
     if analysis_name != filename_metadata.analysis_name:
         raise ValueError(
             f"Analyze metadata analysis_name does not match filename for {path.name}."
@@ -372,17 +356,12 @@ def _load_analyze_artifact(path: Path) -> AnalyzeArtifact | None:
         raise ValueError(
             f"Analyze metadata timestamp does not match filename for {path.name}."
         )
-    if seq_num != filename_metadata.seq_num:
-        raise ValueError(
-            f"Analyze metadata seq_num does not match filename for {path.name}."
-        )
     return AnalyzeArtifact(
         product_id=_read_required_str(metadata, "product_id"),
         timestamp=_read_required_str(metadata, "timestamp"),
         analysis_name=analysis_name,
         path=path,
         analyze_timestamp=analyze_timestamp,
-        seq_num=seq_num,
     )
 
 
@@ -424,7 +403,6 @@ def discover_preprocessed_artifacts(
             artifact.product_id,
             artifact.timestamp,
             artifact.preprocess_timestamp or "",
-            artifact.seq_num if artifact.seq_num is not None else -1,
             artifact.path.name,
         )
     )

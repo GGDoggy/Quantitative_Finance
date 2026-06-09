@@ -13,7 +13,7 @@
 - `src/analyze/core.py`
   - Implements the fill-rate analysis algorithm on one loaded raw batch.
 - `src/analyze/service.py`
-  - Orchestrates raw batch loading, timestamp generation, output naming, single-batch execution, batch-parallel execution, and `.npz` writes.
+  - Orchestrates raw batch loading, output naming, single-batch execution, batch-parallel execution, and `.npz` writes.
 
 ## Data Flow
 
@@ -24,7 +24,7 @@ RawBatch
   -> analyze_loaded_data()
   -> AnalyzeResult
   -> save_result_file()
-  -> analyze-{analysis_name}-{analyze_timestamp}-{seq_num}.npz
+  -> analyze-{analysis_name}-{analyze_timestamp}.npz
   -> src.dataset_artifacts.discover_analyze_artifacts()
 ```
 
@@ -81,7 +81,6 @@ Saved `.npz` artifacts also include:
 
 - `analysis_name`
 - `analyze_timestamp`
-- `seq_num`
 - `product_id`
 - `timestamp`
 - `file_stem`
@@ -101,7 +100,6 @@ Saved `.npz` artifacts also include:
 - `analyze_batch(...)`
 - `analyze_batches(...)`
 - `build_output_path(...)`
-- `generate_analyze_timestamp()`
 
 ## Relationships
 
@@ -118,4 +116,4 @@ Saved `.npz` artifacts also include:
 
 - `AnalyzeRequest.analysis_name` is currently validated but only `fill_rate` is implemented.
 - Output rows are generated only for intervals that contain trades and have a following update boundary.
-- Generated artifact timestamps use `Asia/Taipei`, while raw dataset timestamps come from batch metadata.
+- By default artifact timestamps come from raw batch metadata, so rerunning the same batch overwrites the same output path unless the caller explicitly overrides `analyze_timestamp`.

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import datetime
 import os
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -34,25 +32,17 @@ ANALYZE_RESULT_KEYS = (
     "opp_vol",
     "fill_rate",
 )
-ANALYZE_TIMEZONE = ZoneInfo("Asia/Taipei")
-
-
-def generate_analyze_timestamp() -> str:
-    now = datetime.now(ANALYZE_TIMEZONE)
-    return f"{now.strftime('%Y%m%d.%H%M%S')}.{now.microsecond // 1000:03d}"
 
 
 def build_output_path(
     output_path: Path | str,
     analysis_name: str,
     analyze_timestamp: str,
-    seq_num: int,
 ) -> Path:
     return build_analyze_output_path(
         output_path,
         analysis_name,
         analyze_timestamp,
-        seq_num,
     )
 
 
@@ -79,7 +69,6 @@ def save_result_file(
     *,
     request: AnalyzeRequest,
     analyze_timestamp: str,
-    seq_num: int,
     dataset: RawBatch,
     result: AnalyzeResult,
 ) -> Path:
@@ -87,7 +76,6 @@ def save_result_file(
     save_kwargs = {
         "analysis_name": request.analysis_name,
         "analyze_timestamp": analyze_timestamp,
-        "seq_num": int(seq_num),
         "product_id": dataset.product_id,
         "timestamp": dataset.timestamp,
         "file_stem": dataset.file_stem,
@@ -109,14 +97,14 @@ def analyze_batch(
     dataset: RawBatch,
     request: AnalyzeRequest,
     output_dir: Path | str,
+    *,
+    analyze_timestamp: str | None = None,
 ) -> AnalyzeJobResult:
-    analyze_timestamp = generate_analyze_timestamp()
-    seq_num = 0
+    analyze_timestamp = analyze_timestamp or dataset.timestamp
     output_path = build_output_path(
         output_dir,
         request.analysis_name,
         analyze_timestamp,
-        seq_num,
     )
     overwritten = output_path.exists()
     loaded_data = load_raw_dataset(dataset)
@@ -125,7 +113,6 @@ def analyze_batch(
         output_path,
         request=request,
         analyze_timestamp=analyze_timestamp,
-        seq_num=seq_num,
         dataset=dataset,
         result=result,
     )
@@ -133,7 +120,6 @@ def analyze_batch(
         dataset=dataset,
         output_path=saved_path,
         overwritten=overwritten,
-        seq_num=seq_num,
     )
 
 
@@ -147,13 +133,11 @@ def _process_dataset_job(
     output_path: Path | str,
     request: AnalyzeRequest,
     analyze_timestamp: str,
-    seq_num: int,
 ) -> AnalyzeWorkerPayload:
     output_file = build_output_path(
         output_path,
         request.analysis_name,
         analyze_timestamp,
-        seq_num,
     )
     overwritten = output_file.exists()
     loaded_data = load_raw_dataset(dataset)
@@ -162,7 +146,6 @@ def _process_dataset_job(
         output_file,
         request=request,
         analyze_timestamp=analyze_timestamp,
-        seq_num=seq_num,
         dataset=dataset,
         result=result,
     )
@@ -170,7 +153,6 @@ def _process_dataset_job(
         file_stem=dataset.file_stem,
         output_file=str(saved_path),
         overwritten=overwritten,
-        seq_num=seq_num,
     )
 
 
@@ -178,9 +160,10 @@ def _run_datasets_in_parallel(
     selected: list[RawBatch],
     output_path: Path | str,
     request: AnalyzeRequest,
+    *,
+    analyze_timestamp: str | None = None,
 ) -> list[AnalyzeWorkerPayload]:
     worker_count = get_default_worker_count(len(selected))
-    analyze_timestamp = generate_analyze_timestamp()
     results: list[AnalyzeWorkerPayload] = []
     failures: list[tuple[str, Exception]] = []
     with ProcessPoolExecutor(max_workers=worker_count) as executor:
@@ -190,10 +173,9 @@ def _run_datasets_in_parallel(
                 dataset,
                 output_path,
                 request,
-                analyze_timestamp,
-                seq_num,
+                analyze_timestamp or dataset.timestamp,
             ): dataset
-            for seq_num, dataset in enumerate(selected)
+            for dataset in selected
         }
         for future in as_completed(future_to_dataset):
             dataset = future_to_dataset[future]
@@ -213,11 +195,26 @@ def analyze_batches(
     datasets: list[RawBatch],
     request: AnalyzeRequest,
     output_dir: Path | str,
+    *,
+    analyze_timestamp: str | None = None,
 ) -> list[AnalyzeJobResult]:
     if len(datasets) <= 1:
-        return [analyze_batch(dataset, request, output_dir) for dataset in datasets]
+        return [
+            analyze_batch(
+                dataset,
+                request,
+                output_dir,
+                analyze_timestamp=analyze_timestamp,
+            )
+            for dataset in datasets
+        ]
 
-    results = _run_datasets_in_parallel(datasets, output_dir, request)
+    results = _run_datasets_in_parallel(
+        datasets,
+        output_dir,
+        request,
+        analyze_timestamp=analyze_timestamp,
+    )
     dataset_by_stem = {dataset.file_stem: dataset for dataset in datasets}
     job_results = [
         result.to_job_result(dataset_by_stem[result.file_stem])

@@ -27,11 +27,11 @@ RawBatch
   -> PreprocessContext
   -> PLOT_REGISTRY builders
   -> payload dictionaries
-  -> preprocess-{type}-{timestamp}-{seq}.npz
+  -> preprocess-{type}-{timestamp}.npz
   -> src.dataset_artifacts.discover_preprocessed_artifacts()
 ```
 
-The library pipeline normally writes one artifact per registered preprocess type. A separate repository utility, `result/convert_data.py`, may emit multiple `orderbook` artifacts for the same raw batch when it falls back to chunked conversion after `MemoryError`.
+The library pipeline writes one artifact per registered preprocess type for each raw batch. By default the filename suffix is the raw batch timestamp from the CSV filenames, so one raw batch yields one `orderbook` artifact and one `trade` artifact that share the same `preprocess_timestamp`.
 
 ## Current Outputs
 
@@ -45,7 +45,9 @@ The preprocess pipeline currently writes two dataset types:
 ## Implementation Notes
 
 - `src.preprocess.orderbook.build_orderbook_history(...)` now tracks active bid and ask indices incrementally instead of scanning the full signed book array after every update.
-- The orderbook builder stores only the visible depth rows needed for the final output matrix, avoiding one full orderbook snapshot copy per update.
+- The orderbook builder writes fixed-width depth snapshots per update:
+  - `bid_price`, `bid_size`, `ask_price`, `ask_size`
+- This avoids allocating a dense `updates x active_prices` matrix when the visible quote range sweeps across many price levels.
 
 ## Public API
 

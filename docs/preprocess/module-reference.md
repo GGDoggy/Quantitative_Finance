@@ -21,8 +21,6 @@ Owns the preprocess pipeline that turns one raw batch into one or more `.npz` da
 
 - `DEFAULT_DEPTH`
   - Default orderbook depth used when the caller does not provide one.
-- `PREPROCESS_TIMEZONE`
-  - Time zone used when generating preprocess timestamps for filenames and metadata.
 
 ### Data Models
 
@@ -41,18 +39,18 @@ Owns the preprocess pipeline that turns one raw batch into one or more `.npz` da
 
 ### Functions
 
-- `generate_preprocess_timestamp()`
-  - Returns a timestamp string in `YYYYMMDD.HHMMSS.mmm` format using `PREPROCESS_TIMEZONE`.
 - `_validate_depth(depth)`
   - Rejects non-positive or non-integer depth values.
 - `build_preprocess_context(batch, depth, loaded_batch=None)`
   - Loads a raw batch and normalizes it into a `PreprocessContext`.
 - `_save_preprocess_payload(...)`
   - Writes payload data and metadata into a compressed `.npz` file and rediscovers the written artifact.
-- `preprocess_batch(batch, output_dir, depth=DEFAULT_DEPTH, builder_registry=None, preprocess_timestamp=None, seq_num=0)`
+- `preprocess_batch(batch, output_dir, depth=DEFAULT_DEPTH, builder_registry=None, preprocess_timestamp=None)`
   - Runs every registered preprocess builder for a single raw batch.
-- `preprocess_batches(batches, output_dir, depth=DEFAULT_DEPTH, builder_registry=None, progress_callback=None)`
+  - Defaults `preprocess_timestamp` to `batch.timestamp`.
+- `preprocess_batches(batches, output_dir, depth=DEFAULT_DEPTH, builder_registry=None, progress_callback=None, preprocess_timestamp=None)`
   - Processes multiple raw batches and reports progress if requested.
+  - Uses each batch's `timestamp` unless the caller explicitly overrides `preprocess_timestamp`.
 
 ### `PLOT_REGISTRY`
 
@@ -91,33 +89,16 @@ Builds the orderbook dataset payload.
   - Computes the current best bid and ask prices from the maintained active index lists.
 - `build_orderbook_history(init_rows, update_rows, start_time, depth)`
   - Replays raw orderbook updates and returns:
-    - `price_axis`
     - `time_axis`
-    - `data`
+    - `bid_price`
+    - `bid_size`
+    - `ask_price`
+    - `ask_size`
     - `bid`
     - `ask`
     - `mid`
 - `build_orderbook_payload(context)`
   - Wraps `build_orderbook_history(...)` into the payload dictionary consumed by the pipeline.
-
-### Behavior Notes
-
-- The implementation builds a `price -> index` map once, then updates the signed orderbook array in place.
-- Visible depth selection is incremental: each row stores only the currently visible bid and ask indices instead of copying the full orderbook snapshot.
-- The final `data` matrix is assembled from the union of all visible indices touched across the replayed updates.
-
-### Output Keys
-
-The current orderbook payload includes:
-
-- `price_axis`
-- `time_axis`
-- `data`
-- `bid`
-- `ask`
-- `mid`
-
-Only the first five keys are currently required by the pipeline contract. `mid` is an additional convenience array.
 
 ## `src/preprocess/trade.py`
 
@@ -131,20 +112,6 @@ Builds the trade dataset payload.
   - Sorts raw trade rows by event time using a stable sort.
 - `build_trade_payload(context)`
   - Returns the normalized trade payload used by trade-based views, or empty typed arrays when the batch has no trades.
-
-### Output Keys
-
-- `trade_time`
-- `trade_price`
-- `trade_volume`
-- `trade_side`
-
-## `src/preprocess/exceptions.py`
-
-- `PreprocessError`
-  - Base runtime error for preprocess failures.
-- `PreprocessValidationError`
-  - Raised when preprocess input arguments are invalid.
 
 ## Example
 

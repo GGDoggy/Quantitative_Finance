@@ -9,6 +9,15 @@ if TYPE_CHECKING:
     from .pipeline import PreprocessContext
 
 
+def _signed_book_volume(volume: float, side: float) -> float:
+    normalized_side = int(side)
+    if normalized_side == 1:
+        return float(volume)
+    if normalized_side == -1:
+        return -float(volume)
+    raise ValueError(f"Unsupported orderbook side: {side}")
+
+
 def update_orderbook(
     orderbook: np.ndarray,
     price_index: dict[float, int],
@@ -20,7 +29,7 @@ def update_orderbook(
 ) -> None:
     index = price_index[float(price)]
     previous_value = orderbook[index]
-    new_value = volume * side * -1
+    new_value = _signed_book_volume(volume, side)
 
     if previous_value > 0:
         remove_at = bisect_left(bid_indices, index)
@@ -48,12 +57,42 @@ def get_bid_ask(
     return float(bid), float(ask)
 
 
+def _snapshot_book_side(
+    price_levels: np.ndarray,
+    orderbook: np.ndarray,
+    indices: list[int],
+    depth: int,
+    *,
+    is_bid: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    prices = np.full(depth, np.nan, dtype=float)
+    sizes = np.zeros(depth, dtype=float)
+    if not indices:
+        return prices, sizes
+
+    selected = indices[-depth:][::-1] if is_bid else indices[:depth]
+    for dest_index, source_index in enumerate(selected):
+        prices[dest_index] = float(price_levels[source_index])
+        raw_size = float(orderbook[source_index])
+        sizes[dest_index] = raw_size if is_bid else -raw_size
+    return prices, sizes
+
+
 def build_orderbook_history(
     init_rows: list[list[float]],
     update_rows: list[list[float]],
     start_time: int,
     depth: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     price_levels = {row[0] for row in init_rows}
     price_levels.update(row[1] for row in update_rows)
     sorted_prices = np.array(sorted(price_levels), dtype=float)
@@ -61,10 +100,14 @@ def build_orderbook_history(
     if sorted_prices.size == 0 or not update_rows:
         empty_time = np.array([], dtype="datetime64[ns]")
         empty_float = np.array([], dtype=float)
+        empty_price_snapshot = np.full((0, depth), np.nan, dtype=float)
+        empty_size_snapshot = np.zeros((0, depth), dtype=float)
         return (
-            np.array([], dtype=float),
             empty_time,
-            np.zeros((0, 0), dtype=float),
+            empty_price_snapshot,
+            empty_size_snapshot,
+            empty_price_snapshot.copy(),
+            empty_size_snapshot.copy(),
             empty_float,
             empty_float,
             empty_float,
@@ -90,14 +133,16 @@ def build_orderbook_history(
 
     day_origin = np.datetime64(start_time, "s").astype("datetime64[D]")
     sorted_updates = sorted(update_rows)
-    snapshot_times: list[np.datetime64] = []
-    bids: list[float] = []
-    asks: list[float] = []
-    row_indices: list[list[int]] = []
-    row_values: list[list[float]] = []
-    active_index_set: set[int] = set()
+    update_count = len(sorted_updates)
+    snapshot_times = np.empty(update_count, dtype="datetime64[ns]")
+    bid_prices = np.full((update_count, depth), np.nan, dtype=float)
+    bid_sizes = np.zeros((update_count, depth), dtype=float)
+    ask_prices = np.full((update_count, depth), np.nan, dtype=float)
+    ask_sizes = np.zeros((update_count, depth), dtype=float)
+    bids = np.full(update_count, np.nan, dtype=float)
+    asks = np.full(update_count, np.nan, dtype=float)
 
-    for update in sorted_updates:
+    for row_index, update in enumerate(sorted_updates):
         update_orderbook(
             orderbook,
             price_index,
@@ -107,56 +152,55 @@ def build_orderbook_history(
             update[2],
             update[3],
         )
-        snapshot_times.append(day_origin + np.timedelta64(int(update[0] * 1_000_000_000), "ns"))
+        snapshot_times[row_index] = day_origin + np.timedelta64(
+            int(update[0] * 1_000_000_000),
+            "ns",
+        )
         bid, ask = get_bid_ask(sorted_prices, bid_indices, ask_indices)
-        bids.append(bid)
-        asks.append(ask)
-        visible = bid_indices[-depth:] + ask_indices[:depth]
-        active_index_set.update(visible)
-        row_indices.append(visible)
-        row_values.append([float(orderbook[index]) for index in visible])
+        bids[row_index] = bid
+        asks[row_index] = ask
+        bid_prices[row_index], bid_sizes[row_index] = _snapshot_book_side(
+            sorted_prices,
+            orderbook,
+            bid_indices,
+            depth,
+            is_bid=True,
+        )
+        ask_prices[row_index], ask_sizes[row_index] = _snapshot_book_side(
+            sorted_prices,
+            orderbook,
+            ask_indices,
+            depth,
+            is_bid=False,
+        )
 
-    active_indices = np.array(sorted(active_index_set), dtype=int)
-    if active_indices.size == 0:
-        active_price_axis = np.array([], dtype=float)
-        data = np.zeros((len(sorted_updates), 0), dtype=float)
-    else:
-        active_price_axis = sorted_prices[active_indices]
-        remap = {
-            source_index: dest_index
-            for dest_index, source_index in enumerate(active_indices.tolist())
-        }
-        data = np.zeros((len(sorted_updates), len(active_indices)), dtype=float)
-
-        for row_index, (indices, values) in enumerate(zip(row_indices, row_values, strict=True)):
-            for source_index, value in zip(indices, values, strict=True):
-                data[row_index, remap[source_index]] = value
-
-    bid_array = np.asarray(bids, dtype=float)
-    ask_array = np.asarray(asks, dtype=float)
-    mid_array = 0.5 * (bid_array + ask_array)
+    mid_array = 0.5 * (bids + asks)
 
     return (
-        active_price_axis,
-        np.asarray(snapshot_times, dtype="datetime64[ns]"),
-        data,
-        bid_array,
-        ask_array,
+        snapshot_times,
+        bid_prices,
+        bid_sizes,
+        ask_prices,
+        ask_sizes,
+        bids,
+        asks,
         mid_array,
     )
 
 
 def build_orderbook_payload(context: PreprocessContext) -> dict[str, object]:
-    price_axis, time_axis, data, bid, ask, mid = build_orderbook_history(
+    time_axis, bid_price, bid_size, ask_price, ask_size, bid, ask, mid = build_orderbook_history(
         context.init_rows,
         context.updates_rows,
         int(context.start_time),
         context.depth,
     )
     return {
-        "price_axis": price_axis,
         "time_axis": time_axis,
-        "data": data,
+        "bid_price": bid_price,
+        "bid_size": bid_size,
+        "ask_price": ask_price,
+        "ask_size": ask_size,
         "bid": bid,
         "ask": ask,
         "mid": mid,

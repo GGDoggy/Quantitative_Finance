@@ -55,7 +55,6 @@ class AnalyzeJobResult:
     dataset: RawBatch
     output_path: Path
     overwritten: bool
-    seq_num: int
 
 
 @dataclass(frozen=True)
@@ -63,12 +62,10 @@ class AnalyzeWorkerPayload:
     file_stem: str
     output_file: str
     overwritten: bool
-    seq_num: int
 
     def to_job_result(self, dataset: RawBatch) -> AnalyzeJobResult:
         return AnalyzeJobResult(
             dataset=dataset,
             output_path=Path(self.output_file),
             overwritten=self.overwritten,
-            seq_num=self.seq_num,
         )

@@ -5,3 +5,4 @@ __pycache__/
 .codex_tmp
 test/*
 .env
+.graphifyignore
