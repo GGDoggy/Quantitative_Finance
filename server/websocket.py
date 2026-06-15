@@ -57,7 +57,7 @@ def unix_to_daily_sec(unix_time: str):
     sec = int(time.strftime("%S", time.gmtime(t[0])))
     min = int(time.strftime("%M", time.gmtime(t[0])))
     hr = int(time.strftime("%H", time.gmtime(t[0])))
-    return hr*1440 + min*60 + sec + t[1]
+    return hr*3600 + min*60 + sec + t[1]
 
 def update_to_order(update):
     side = {"bid":1, "offer":-1}[update["side"]]

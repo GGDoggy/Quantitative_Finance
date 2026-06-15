@@ -114,19 +114,28 @@ data/v3 CSV
 
 ## Execution And Behavior
 
+- Python environment:
+  - Always use the `quantitative_finance` environment for any Python command in this repository, including scripts, tests, tooling, and the dashboard.
+  - Prefer `conda activate quantitative_finance` before running project commands in an interactive shell.
+  - For one-off commands, prefer `conda run -n quantitative_finance ...` to avoid ambiguity about the active interpreter.
+  - Do not use another Python environment unless the user explicitly asks for it.
 - Raw data collection:
+  - Use the `quantitative_finance` environment.
   - `server/websocket.py` should be run with `server/` as the working directory.
   - The script writes `level2-...csv` and `trade-...csv` to the current working directory. It does not automatically write into `data/`.
 - Dashboard startup:
+  - Use the `quantitative_finance` environment.
   - Run `python gui/webUI.py` from the repository root.
   - The default raw data directory is `data/v3`.
   - The default preprocessed directory is `data/preprocessed`.
   - `gui/webUI.py` serves the app with `pn.serve(build_app, title="Orderbook Viewer", show=True)`.
 - Preprocessing:
+  - Use the `quantitative_finance` environment.
   - `src.preprocess.preprocess_batch()` converts a single raw batch into `*-orderbook_for_plot.npz`.
   - `src.preprocess.preprocess_batches()` supports batch processing.
   - `gui/dashboard.py` exposes raw batch catalog discovery and preprocess actions in the UI.
 - Simulation:
+  - Use the `quantitative_finance` environment.
   - `src.simulation.simulate_batch()` and `simulate_batches()` write outputs to `data/preprocessed/`.
   - Simulation filenames include `time_step`, `resolved_time`, and `algorithm_name`.
   - `gui/dashboard.py` can run simulation directly from the UI on selected raw batches.
