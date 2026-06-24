@@ -1,4 +1,4 @@
 {
-    "saving_interval": 300,
+    "saving_interval": 1800,
     "product_id": ["ETH-USD"]
 }

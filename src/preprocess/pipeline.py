@@ -27,6 +27,7 @@ DEFAULT_DEPTH = 10
 class PreprocessContext:
     batch: RawBatch
     depth: int
+    trade_window_seconds: int
     start_time: float
     init_rows: list[list[float]]
     updates_rows: list[list[float]]
@@ -45,21 +46,13 @@ PLOT_REGISTRY: dict[str, PreprocessBuilderSpec] = {
     "orderbook": PreprocessBuilderSpec(
         preprocess_type="orderbook",
         preprocess_builder=build_orderbook_payload,
-        required_payload_keys=(
-            "time_axis",
-            "bid_price",
-            "bid_size",
-            "ask_price",
-            "ask_size",
-            "bid",
-            "ask",
-        ),
+        required_payload_keys=(),
         available_views=("orderbook",),
     ),
     "trade": PreprocessBuilderSpec(
         preprocess_type="trade",
         preprocess_builder=build_trade_payload,
-        required_payload_keys=("trade_time", "trade_price", "trade_volume", "trade_side"),
+        required_payload_keys=(),
         available_views=("trades_scatter", "trade_volume_timeline"),
     ),
 }
@@ -71,16 +64,26 @@ def _validate_depth(depth: int) -> int:
     return depth
 
 
+def _validate_trade_window_seconds(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise PreprocessValidationError(
+            "trade_window_seconds must be a positive integer."
+        )
+    return value
+
+
 def build_preprocess_context(
     batch: RawBatch,
     depth: int,
     *,
     loaded_batch: LoadedRawBatch | None = None,
+    trade_window_seconds: int = 1,
 ) -> PreprocessContext:
     loaded = loaded_batch or load_raw_batch(batch)
     return PreprocessContext(
         batch=batch,
         depth=_validate_depth(depth),
+        trade_window_seconds=_validate_trade_window_seconds(trade_window_seconds),
         start_time=loaded.start_time,
         init_rows=loaded.init,
         updates_rows=loaded.updates,
@@ -113,6 +116,17 @@ def _save_preprocess_payload(
     if preprocess_type == "orderbook":
         metadata["depth"] = int(context.depth)
 
+    merged_payload: dict[str, object]
+    if preprocess_type == "trade":
+        existing_payload = _load_existing_npz(output_path)
+        merged_payload = _merge_trade_payload(existing_payload, payload, metadata)
+    elif preprocess_type == "orderbook":
+        existing_payload = _load_existing_npz(output_path)
+        merged_payload = _merge_orderbook_payload(existing_payload, payload, metadata)
+    else:
+        merged_payload = dict(payload)
+        merged_payload.update(metadata)
+
     with tempfile.NamedTemporaryFile(
         dir=output_dir,
         prefix=output_path.stem + "-",
@@ -122,7 +136,7 @@ def _save_preprocess_payload(
         temp_path = Path(temp_file.name)
 
     try:
-        np.savez_compressed(temp_path, **payload, **metadata)
+        np.savez_compressed(temp_path, **merged_payload)
         temp_path.replace(output_path)
     finally:
         if temp_path.exists():
@@ -135,14 +149,145 @@ def _save_preprocess_payload(
     raise FileNotFoundError(f"Failed to discover freshly written dataset: {output_path}")
 
 
+def _load_existing_npz(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    with np.load(path, allow_pickle=False) as existing:
+        return {key: np.array(existing[key], copy=True) for key in existing.files}
+
+
+def _merge_trade_payload(
+    existing: Mapping[str, object],
+    payload: Mapping[str, object],
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    latest_value = payload.get("trade_window_seconds_latest")
+    if latest_value is None:
+        raise PreprocessValidationError(
+            "Trade payload is missing trade_window_seconds_latest metadata."
+        )
+    try:
+        trade_window_seconds = int(latest_value)
+    except (TypeError, ValueError) as error:
+        raise PreprocessValidationError(
+            f"Invalid trade_window_seconds_latest metadata: {latest_value!r}"
+        ) from error
+
+    suffix = f"__w{trade_window_seconds}"
+    window_keys = {
+        f"trade_time{suffix}",
+        f"trade_price{suffix}",
+        f"trade_volume{suffix}",
+        f"trade_side{suffix}",
+    }
+    missing_window_keys = sorted(window_keys - set(payload))
+    if missing_window_keys:
+        raise PreprocessValidationError(
+            "Trade payload is missing required windowed keys: "
+            + ", ".join(missing_window_keys)
+        )
+
+    merged = dict(existing)
+    merged.update(metadata)
+    for key in window_keys:
+        merged[key] = payload[key]
+
+    existing_windows_raw = existing.get("trade_window_seconds_available")
+    existing_windows: set[int] = set()
+    if existing_windows_raw is not None:
+        existing_windows = {
+            int(item) for item in np.asarray(existing_windows_raw, dtype=int).tolist()
+        }
+    existing_windows.add(trade_window_seconds)
+    merged["trade_window_seconds_available"] = np.asarray(
+        sorted(existing_windows),
+        dtype=int,
+    )
+    merged["trade_window_seconds_latest"] = int(trade_window_seconds)
+    return merged
+
+
+def _merge_orderbook_payload(
+    existing: Mapping[str, object],
+    payload: Mapping[str, object],
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    latest_value = payload.get("orderbook_window_seconds_latest")
+    if latest_value is None:
+        raise PreprocessValidationError(
+            "Orderbook payload is missing orderbook_window_seconds_latest metadata."
+        )
+    try:
+        trade_window_seconds = int(latest_value)
+    except (TypeError, ValueError) as error:
+        raise PreprocessValidationError(
+            f"Invalid orderbook_window_seconds_latest metadata: {latest_value!r}"
+        ) from error
+
+    suffix = f"__w{trade_window_seconds}"
+    window_keys = {
+        f"time_axis{suffix}",
+        f"bid_price{suffix}",
+        f"bid_size{suffix}",
+        f"ask_price{suffix}",
+        f"ask_size{suffix}",
+        f"bid{suffix}",
+        f"ask{suffix}",
+        f"mid{suffix}",
+    }
+    missing_window_keys = sorted(window_keys - set(payload))
+    if missing_window_keys:
+        raise PreprocessValidationError(
+            "Orderbook payload is missing required windowed keys: "
+            + ", ".join(missing_window_keys)
+        )
+
+    merged = {
+        key: value
+        for key, value in existing.items()
+        if key not in {
+            "time_axis",
+            "bid_price",
+            "bid_size",
+            "ask_price",
+            "ask_size",
+            "bid",
+            "ask",
+            "mid",
+        }
+    }
+    merged.update(metadata)
+    for key in window_keys:
+        merged[key] = payload[key]
+
+    existing_windows_raw = existing.get("orderbook_window_seconds_available")
+    existing_windows: set[int] = set()
+    if existing_windows_raw is not None:
+        existing_windows = {
+            int(item) for item in np.asarray(existing_windows_raw, dtype=int).tolist()
+        }
+    existing_windows.add(trade_window_seconds)
+    merged["orderbook_window_seconds_available"] = np.asarray(
+        sorted(existing_windows),
+        dtype=int,
+    )
+    merged["orderbook_window_seconds_latest"] = int(trade_window_seconds)
+    return merged
+
+
 def preprocess_batch(
     batch: RawBatch,
     output_dir: Path,
     depth: int = DEFAULT_DEPTH,
     builder_registry: Mapping[str, PreprocessBuilderSpec] | None = None,
     preprocess_timestamp: str | None = None,
+    trade_window_seconds: int = 1,
 ) -> list[PreprocessedDataset]:
-    context = build_preprocess_context(batch, depth)
+    context = build_preprocess_context(
+        batch,
+        depth,
+        trade_window_seconds=trade_window_seconds,
+    )
     registry = PLOT_REGISTRY if builder_registry is None else builder_registry
     preprocess_timestamp = preprocess_timestamp or batch.timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -175,6 +320,7 @@ def preprocess_batches(
     builder_registry: Mapping[str, PreprocessBuilderSpec] | None = None,
     progress_callback: Callable[[str], None] | None = None,
     preprocess_timestamp: str | None = None,
+    trade_window_seconds: int = 1,
 ) -> list[PreprocessedDataset]:
     results: list[PreprocessedDataset] = []
     total = len(batches)
@@ -189,6 +335,7 @@ def preprocess_batches(
                 depth=depth,
                 builder_registry=builder_registry,
                 preprocess_timestamp=preprocess_timestamp or batch.timestamp,
+                trade_window_seconds=trade_window_seconds,
             )
         )
 

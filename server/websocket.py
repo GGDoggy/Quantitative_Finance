@@ -2,7 +2,6 @@ from coinbase.websocket import WSClient
 import json
 import time
 import calendar
-import bisect
 import copy
 import asyncio
 import aiofiles
@@ -61,8 +60,35 @@ def unix_to_daily_sec(unix_time: str):
 
 def update_to_order(update):
     side = {"bid":1, "offer":-1}[update["side"]]
-    price = float(update["price_level"])
-    return [(-side, price), unix_to_daily_sec(update["event_time"]), update["price_level"], update["new_quantity"], side]
+    price_level = update["price_level"]
+    new_quantity = update["new_quantity"]
+    return (
+        (side, float(price_level)),
+        unix_to_daily_sec(update["event_time"]),
+        price_level,
+        new_quantity,
+        side,
+    )
+
+def update_to_csvarr(order_update):
+    _, event_time, price_level, new_quantity, side = order_update
+    return [event_time, price_level, new_quantity, side]
+
+def _has_positive_quantity(quantity):
+    return float(quantity) > 0
+
+def apply_order_update(orderbook, order_update):
+    book_key, event_time, price_level, new_quantity, side = order_update
+    existing = orderbook.get(book_key)
+    if existing is not None and existing[0] >= event_time:
+        return False
+    if not _has_positive_quantity(new_quantity):
+        if existing is None:
+            return False
+        del orderbook[book_key]
+        return True
+    orderbook[book_key] = (event_time, price_level, new_quantity, side)
+    return True
 
 def one_trade_to_csvarr(trade):
     t = str(unix_to_daily_sec(trade["time"])) + str(received_time_to_float(trade["time"])[1])[1:]
@@ -70,10 +96,10 @@ def one_trade_to_csvarr(trade):
 
 def orderbook_to_csvarr(snapshot):
     csvarr = []
-    orderbook = []
+    orderbook = {}
     for s in snapshot:
         csvarr.append([s["price_level"], s["new_quantity"], {"bid":1, "offer":-1}[s["side"]]])
-        orderbook.append(update_to_order(s))
+        apply_order_update(orderbook, update_to_order(s))
     return csvarr, orderbook
 
 def save_all_data(l2_updates, trade, id, start_time):
@@ -123,36 +149,23 @@ def on_message(msg):
     if msg["channel"] == "l2_data":
         for event in msg["events"]:
             if event["type"] == "snapshot":
-                if orderbook:
+                if start_time is not None:
                     # Get second snapshot -> something went wrong
                     print("Received second snapshot.")
                     restart = True
                     break
                 start_time = received_time_to_float(msg["timestamp"])[0]
                 csvarr, orderbook = orderbook_to_csvarr(event["updates"])
-                orderbook.sort()
                 # Save init orderbook
                 trigger_save_l2(copy.deepcopy(csvarr), id, "init", start_time)
                 print("Level2 init saved.")
             else:  # Receive update
                 for update in event["updates"]:
-                    if orderbook == []:
+                    if start_time is None:
                         continue
-                    u = update_to_order(update)
-                    ind = bisect.bisect_left(orderbook, u)
-                    # Only keep new information
-                    if ind >= len(orderbook):
-                        l2_hist.append(u[1:])
-                        orderbook.append(u)
-                    elif orderbook[ind][1] < u[1]:
-                        l2_hist.append(u[1:])
-                        if orderbook[ind][2] == u[2] and orderbook[ind][4] == u[4]:
-                            if u[2] == "0":
-                                del orderbook[ind]
-                            else:
-                                orderbook[ind] = u
-                        else:
-                            bisect.insort(orderbook, u)
+                    order_update = update_to_order(update)
+                    if apply_order_update(orderbook, order_update):
+                        l2_hist.append(update_to_csvarr(order_update))
     
     if msg["channel"] == "market_trades":
         for event in msg["events"]:            
@@ -180,7 +193,7 @@ ws_client = WSClient(on_message=on_message, verbose=True)
 while run:
     l2_hist = []
     trade_hist = []
-    orderbook = []
+    orderbook = {}
     start_time = None
     restart = False
     heartbeat_counter = 0

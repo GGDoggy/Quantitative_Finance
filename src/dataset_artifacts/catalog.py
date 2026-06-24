@@ -232,6 +232,26 @@ def _normalized_view_specs(
     return tuple((view_key, frozenset(required_keys)) for view_key, required_keys in view_specs)
 
 
+def _has_windowed_orderbook_keys(data_keys: set[str]) -> bool:
+    prefixes = (
+        "time_axis__w",
+        "bid_price__w",
+        "bid_size__w",
+        "ask_price__w",
+        "ask_size__w",
+        "bid__w",
+        "ask__w",
+    )
+    return any(
+        all(f"{base}{suffix}" in data_keys for base in prefixes)
+        for suffix in {
+            key.removeprefix("time_axis")
+            for key in data_keys
+            if key.startswith("time_axis__w")
+        }
+    )
+
+
 def detect_available_views(
     path: Path,
     view_specs: ViewSpecs | None = None,
@@ -246,6 +266,7 @@ def detect_available_views(
                 if (
                     LEGACY_ORDERBOOK_VIEW_KEYS.issubset(data_keys)
                     or SNAPSHOT_ORDERBOOK_VIEW_KEYS.issubset(data_keys)
+                    or _has_windowed_orderbook_keys(data_keys)
                 ):
                     available_views_list.append("orderbook")
                 available_views_list.extend(

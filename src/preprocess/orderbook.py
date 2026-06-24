@@ -5,6 +5,14 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .time_utils import (
+    compute_trimmed_window,
+    event_seconds_to_datetime64,
+    iter_bucket_starts,
+    sort_and_normalize_event_seconds,
+    sorted_update_times,
+)
+
 if TYPE_CHECKING:
     from .pipeline import PreprocessContext
 
@@ -78,11 +86,39 @@ def _snapshot_book_side(
     return prices, sizes
 
 
+def _orderbook_window_key(base_name: str, trade_window_seconds: int) -> str:
+    return f"{base_name}__w{trade_window_seconds}"
+
+
+def _empty_orderbook_payload(
+    trade_window_seconds: int,
+    depth: int,
+) -> dict[str, object]:
+    empty_time = np.array([], dtype="datetime64[ns]")
+    empty_float = np.array([], dtype=float)
+    empty_price_snapshot = np.full((0, depth), np.nan, dtype=float)
+    empty_size_snapshot = np.zeros((0, depth), dtype=float)
+    return {
+        _orderbook_window_key("time_axis", trade_window_seconds): empty_time,
+        _orderbook_window_key("bid_price", trade_window_seconds): empty_price_snapshot,
+        _orderbook_window_key("bid_size", trade_window_seconds): empty_size_snapshot,
+        _orderbook_window_key("ask_price", trade_window_seconds): empty_price_snapshot.copy(),
+        _orderbook_window_key("ask_size", trade_window_seconds): empty_size_snapshot.copy(),
+        _orderbook_window_key("bid", trade_window_seconds): empty_float,
+        _orderbook_window_key("ask", trade_window_seconds): empty_float,
+        _orderbook_window_key("mid", trade_window_seconds): empty_float,
+        "orderbook_window_seconds_available": np.asarray([trade_window_seconds], dtype=int),
+        "orderbook_window_seconds_latest": int(trade_window_seconds),
+    }
+
+
 def build_orderbook_history(
     init_rows: list[list[float]],
     update_rows: list[list[float]],
+    trade_rows: list[list[float]],
     start_time: int,
     depth: int,
+    trade_window_seconds: int,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -93,11 +129,72 @@ def build_orderbook_history(
     np.ndarray,
     np.ndarray,
 ]:
+    if not update_rows or not trade_rows:
+        empty_time = np.array([], dtype="datetime64[ns]")
+        empty_float = np.array([], dtype=float)
+        empty_price_snapshot = np.full((0, depth), np.nan, dtype=float)
+        empty_size_snapshot = np.zeros((0, depth), dtype=float)
+        return (
+            empty_time,
+            empty_price_snapshot,
+            empty_size_snapshot,
+            empty_price_snapshot.copy(),
+            empty_size_snapshot.copy(),
+            empty_float,
+            empty_float,
+            empty_float,
+        )
+
+    update_rows_array = np.asarray(update_rows, dtype=float)
+    if update_rows_array.ndim != 2 or update_rows_array.shape[1] != 4:
+        raise ValueError("Update rows must be a 2D array with columns: time, price, volume, side.")
+    trade_rows_array = np.asarray(trade_rows, dtype=float)
+    if trade_rows_array.ndim != 2 or trade_rows_array.shape[1] != 4:
+        raise ValueError("Trade rows must be a 2D array with columns: time, price, volume, side.")
+
+    normalized_trade_times, _ = sort_and_normalize_event_seconds(trade_rows_array[:, 0])
+    normalized_update_times = sorted_update_times(update_rows)
+    trimmed_window = compute_trimmed_window(normalized_trade_times, normalized_update_times)
+    if trimmed_window is None:
+        empty_time = np.array([], dtype="datetime64[ns]")
+        empty_float = np.array([], dtype=float)
+        empty_price_snapshot = np.full((0, depth), np.nan, dtype=float)
+        empty_size_snapshot = np.zeros((0, depth), dtype=float)
+        return (
+            empty_time,
+            empty_price_snapshot,
+            empty_size_snapshot,
+            empty_price_snapshot.copy(),
+            empty_size_snapshot.copy(),
+            empty_float,
+            empty_float,
+            empty_float,
+        )
+
+    bucket_starts = np.asarray(
+        list(iter_bucket_starts(trimmed_window[0], trimmed_window[1], trade_window_seconds)),
+        dtype=float,
+    )
+    if bucket_starts.size == 0:
+        empty_time = np.array([], dtype="datetime64[ns]")
+        empty_float = np.array([], dtype=float)
+        empty_price_snapshot = np.full((0, depth), np.nan, dtype=float)
+        empty_size_snapshot = np.zeros((0, depth), dtype=float)
+        return (
+            empty_time,
+            empty_price_snapshot,
+            empty_size_snapshot,
+            empty_price_snapshot.copy(),
+            empty_size_snapshot.copy(),
+            empty_float,
+            empty_float,
+            empty_float,
+        )
+
     price_levels = {row[0] for row in init_rows}
     price_levels.update(row[1] for row in update_rows)
     sorted_prices = np.array(sorted(price_levels), dtype=float)
-
-    if sorted_prices.size == 0 or not update_rows:
+    if sorted_prices.size == 0:
         empty_time = np.array([], dtype="datetime64[ns]")
         empty_float = np.array([], dtype=float)
         empty_price_snapshot = np.full((0, depth), np.nan, dtype=float)
@@ -132,30 +229,36 @@ def build_orderbook_history(
         )
 
     day_origin = np.datetime64(start_time, "s").astype("datetime64[D]")
-    sorted_updates = sorted(update_rows)
-    update_count = len(sorted_updates)
-    snapshot_times = np.empty(update_count, dtype="datetime64[ns]")
-    bid_prices = np.full((update_count, depth), np.nan, dtype=float)
-    bid_sizes = np.zeros((update_count, depth), dtype=float)
-    ask_prices = np.full((update_count, depth), np.nan, dtype=float)
-    ask_sizes = np.zeros((update_count, depth), dtype=float)
-    bids = np.full(update_count, np.nan, dtype=float)
-    asks = np.full(update_count, np.nan, dtype=float)
+    normalized_seconds, order = sort_and_normalize_event_seconds(update_rows_array[:, 0])
+    ordered_updates = update_rows_array[order]
+    ordered_update_times = normalized_seconds
+    snapshot_times = event_seconds_to_datetime64(bucket_starts, day_origin)
+    snapshot_count = len(bucket_starts)
+    bid_prices = np.full((snapshot_count, depth), np.nan, dtype=float)
+    bid_sizes = np.zeros((snapshot_count, depth), dtype=float)
+    ask_prices = np.full((snapshot_count, depth), np.nan, dtype=float)
+    ask_sizes = np.zeros((snapshot_count, depth), dtype=float)
+    bids = np.full(snapshot_count, np.nan, dtype=float)
+    asks = np.full(snapshot_count, np.nan, dtype=float)
 
-    for row_index, update in enumerate(sorted_updates):
-        update_orderbook(
-            orderbook,
-            price_index,
-            bid_indices,
-            ask_indices,
-            update[1],
-            update[2],
-            update[3],
-        )
-        snapshot_times[row_index] = day_origin + np.timedelta64(
-            int(update[0] * 1_000_000_000),
-            "ns",
-        )
+    update_index = 0
+    for row_index, bucket_start in enumerate(bucket_starts):
+        while (
+            update_index < len(ordered_updates)
+            and ordered_update_times[update_index] < bucket_start
+        ):
+            update = ordered_updates[update_index]
+            update_orderbook(
+                orderbook,
+                price_index,
+                bid_indices,
+                ask_indices,
+                update[1],
+                update[2],
+                update[3],
+            )
+            update_index += 1
+
         bid, ask = get_bid_ask(sorted_prices, bid_indices, ask_indices)
         bids[row_index] = bid
         asks[row_index] = ask
@@ -189,19 +292,26 @@ def build_orderbook_history(
 
 
 def build_orderbook_payload(context: PreprocessContext) -> dict[str, object]:
+    trade_window_seconds = int(context.trade_window_seconds)
     time_axis, bid_price, bid_size, ask_price, ask_size, bid, ask, mid = build_orderbook_history(
         context.init_rows,
         context.updates_rows,
+        context.trades_rows,
         int(context.start_time),
         context.depth,
+        trade_window_seconds,
     )
+    if time_axis.shape == (0,):
+        return _empty_orderbook_payload(trade_window_seconds, context.depth)
     return {
-        "time_axis": time_axis,
-        "bid_price": bid_price,
-        "bid_size": bid_size,
-        "ask_price": ask_price,
-        "ask_size": ask_size,
-        "bid": bid,
-        "ask": ask,
-        "mid": mid,
+        _orderbook_window_key("time_axis", trade_window_seconds): time_axis,
+        _orderbook_window_key("bid_price", trade_window_seconds): bid_price,
+        _orderbook_window_key("bid_size", trade_window_seconds): bid_size,
+        _orderbook_window_key("ask_price", trade_window_seconds): ask_price,
+        _orderbook_window_key("ask_size", trade_window_seconds): ask_size,
+        _orderbook_window_key("bid", trade_window_seconds): bid,
+        _orderbook_window_key("ask", trade_window_seconds): ask,
+        _orderbook_window_key("mid", trade_window_seconds): mid,
+        "orderbook_window_seconds_available": np.asarray([trade_window_seconds], dtype=int),
+        "orderbook_window_seconds_latest": int(trade_window_seconds),
     }
