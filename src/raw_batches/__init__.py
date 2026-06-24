@@ -1,4 +1,4 @@
-"""Raw v3 CSV batch naming, discovery, and loading."""
+"""Raw CSV batch naming, discovery, and loading."""
 
 from .api import (
     LoadedRawBatch,

@@ -1,4 +1,4 @@
-"""Preprocess pipeline for converting raw batches into dashboard datasets."""
+"""Preprocess pipeline for converting raw batches into preprocess datasets."""
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping

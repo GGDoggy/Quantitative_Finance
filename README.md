@@ -1,20 +1,20 @@
 # Quantitative Finance Project
 
-This repository is a quantitative finance research project built around Coinbase market data. The active codebase is organized around raw batch ingestion, preprocess artifact generation, and trade fill-rate analysis.
+This repository is a quantitative finance research project built around Coinbase market data. The active documentation focus is raw batch ingestion and windowed preprocess artifact generation.
 
 ## Current Pipeline
 
 ```text
-data/v3/*.csv
+data/raw/*.csv
   -> src.raw_batches
   -> src.preprocess
   -> data/preprocessed/preprocess-*.npz
-  -> downstream discovery / visualization
+  -> src.dataset_artifacts discovery / downstream visualization
 
-data/v3/*.csv
-  -> src.raw_batches
-  -> src.analyze
-  -> data/preprocessed/analyze-*.npz
+data/raw/*.csv
+  -> result/convert_data.py
+  -> src.preprocess.preprocess_batch()
+  -> data/preprocessed/preprocess-*.npz
 ```
 
 ## Project Layout
@@ -24,21 +24,24 @@ data/v3/*.csv
 - `src/raw_batches/`
   - Raw CSV filename parsing, batch discovery, and loading.
 - `src/preprocess/`
-  - Raw batch to preprocessed `.npz` pipeline.
+  - Raw batch to windowed preprocessed `.npz` pipeline.
 - `src/dataset_artifacts/`
-  - Preprocess and analyze artifact naming, parsing, and discovery.
-- `src/analyze/`
-  - Trade fill-rate analysis pipeline and artifact writing.
+  - Preprocess artifact naming, parsing, and discovery.
 - `docs/`
   - Module documentation and contracts.
+- `result/`
+  - Conversion scripts and research notebooks. `result/convert_data.py` preprocesses `data/raw` batches for multiple trade windows.
 - `test/`
   - Automated tests.
 
 ## Installation
 
 ```bash
+conda activate quantitative_finance
 pip install -r requirements.txt
 ```
+
+For one-off commands, prefer `conda run -n quantitative_finance ...` so the project interpreter is explicit.
 
 ## Raw Data Collection
 
@@ -69,22 +72,14 @@ Important constraints:
 - `preprocess_batch(...)`
 - `preprocess_batches(...)`
 
+`preprocess_batch(..., trade_window_seconds=N)` writes one orderbook artifact and one trade artifact for the selected raw batch. Re-running the same `preprocess_timestamp` with a different `N` appends a new `__wN` payload version to the same preprocess files; re-running the same `N` overwrites only that version.
+
 ### `src.dataset_artifacts`
 
 - `build_preprocessed_output_path(...)`
-- `build_analyze_output_path(...)`
 - `parse_preprocessed_filename(...)`
-- `parse_analyze_filename(...)`
 - `discover_preprocessed_artifacts(...)`
-- `discover_analyze_artifacts(...)`
 - `detect_available_views(...)`
-
-### `src.analyze`
-
-- `analyze_loaded_data(...)`
-- `analyze_batch(dataset, request, output_dir)`
-- `analyze_batches(datasets, request, output_dir)`
-- `build_output_path(...)`
 
 ## Artifact Formats
 
@@ -94,15 +89,17 @@ Preprocess outputs:
 data/preprocessed/preprocess-{preprocess_type}-{preprocess_timestamp}.npz
 ```
 
-Analyze outputs:
+Current preprocess types are:
 
-```text
-data/preprocessed/analyze-{analysis_name}-{analyze_timestamp}.npz
-```
+- `orderbook`
+  - Windowed keys such as `time_axis__w5`, `bid_price__w5`, `bid_size__w5`, `ask_price__w5`, `ask_size__w5`, `bid__w5`, `ask__w5`, and `mid__w5`.
+- `trade`
+  - Windowed keys such as `trade_time__w5`, `trade_price__w5`, `trade_volume__w5`, and `trade_side__w5`.
 
 ## Documentation
 
 - [docs/README.md](docs/README.md)
 - [docs/raw_batches/README.md](docs/raw_batches/README.md)
 - [docs/preprocess/README.md](docs/preprocess/README.md)
+- [docs/preprocess/formats-and-contracts.md](docs/preprocess/formats-and-contracts.md)
 - [docs/dataset_artifacts/README.md](docs/dataset_artifacts/README.md)

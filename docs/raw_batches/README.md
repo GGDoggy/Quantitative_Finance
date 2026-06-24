@@ -1,6 +1,8 @@
 # `src.raw_batches`
 
-`src.raw_batches` handles parsing, discovery, and loading for `data/v3` raw CSV batches.
+`src.raw_batches` handles parsing, discovery, and loading for `data/raw` CSV batches.
+
+`data/raw` is the only raw data directory in the current repository layout.
 
 ## Responsibilities
 
