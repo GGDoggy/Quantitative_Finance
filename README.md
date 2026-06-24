@@ -31,17 +31,12 @@ data/raw/*.csv
   - Module documentation and contracts.
 - `result/`
   - Conversion scripts and research notebooks. `result/convert_data.py` preprocesses `data/raw` batches for multiple trade windows.
-- `test/`
-  - Automated tests.
 
 ## Installation
 
 ```bash
-conda activate quantitative_finance
 pip install -r requirements.txt
 ```
-
-For one-off commands, prefer `conda run -n quantitative_finance ...` so the project interpreter is explicit.
 
 ## Raw Data Collection
 
