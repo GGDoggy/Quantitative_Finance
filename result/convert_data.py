@@ -14,7 +14,7 @@ from src.preprocess import DEFAULT_DEPTH, preprocess_batch
 from src.raw_batches import RawBatch, discover_raw_batches
 
 
-RAW_DATA_DIR = PROJECT_ROOT / "data" / "temp"
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "preprocessed"
 PREPROCESS_DEPTH = DEFAULT_DEPTH
 PREPROCESS_TRADE_WINDOWS = (1, 5, 10, 30)
